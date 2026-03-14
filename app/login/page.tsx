@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { loginWithCode } from '@/lib/api';
 import { getToken, setToken } from '@/lib/auth';
+import { mapErrorToMessage } from '@/lib/errors';
 
 export default function LoginPage() {
   const router = useRouter();
   const [code, setCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
 
   useEffect(() => {
     if (getToken()) {
@@ -35,9 +36,7 @@ export default function LoginPage() {
       setToken(token);
       router.replace('/overview');
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Login failed. Try again.';
-      setError(message);
+      setError(err);
     } finally {
       setIsSubmitting(false);
     }
@@ -45,29 +44,52 @@ export default function LoginPage() {
 
   return (
     <div className="page-center">
-      <form className="card login-card animate-in" onSubmit={handleSubmit}>
-        <div>
-          <h1>Insight</h1>
-          <p>Enter the six-character access code for the event.</p>
-        </div>
-        <label>
-          <div className="helper-text">Access code</div>
-          <input
-            value={code}
-            onChange={(event) => handleChange(event.target.value)}
-            maxLength={6}
-            autoComplete="one-time-code"
-            placeholder="ABC123"
-          />
-        </label>
-        {error ? <div className="error">{error}</div> : null}
-        <div className="login-actions">
-          <button className="btn btn-primary" disabled={isSubmitting}>
-            {isSubmitting ? 'Verifying...' : 'Enter Dashboard'}
-          </button>
-          <span className="helper-text">Code auto-capitalizes.</span>
-        </div>
-      </form>
+      <div className="auth-stage auth-stage-compact">
+        <form
+          className="card login-panel login-form-panel animate-in"
+          onSubmit={handleSubmit}
+        >
+          <div>
+            <div className="hero-kicker">Insight</div>
+            <h2>Enter code</h2>
+          </div>
+          <label>
+            <div className="field-label">6-character code</div>
+            <input
+              value={code}
+              onChange={(event) => handleChange(event.target.value)}
+              maxLength={6}
+              autoComplete="one-time-code"
+              inputMode="text"
+              placeholder="ABC123"
+            />
+          </label>
+          <div className="code-slots" aria-hidden="true">
+            {Array.from({ length: 6 }, (_, index) => {
+              const character = code[index] ?? '';
+              return (
+                <span
+                  key={index}
+                  className={`code-slot ${character ? 'filled' : ''}`}
+                >
+                  {character || ' '}
+                </span>
+              );
+            })}
+          </div>
+          {error ? (
+            <div className="error" role="alert">
+              <strong>Unable to sign in</strong>
+              <span>{mapErrorToMessage(error)}</span>
+            </div>
+          ) : null}
+          <div className="login-actions">
+            <button className="btn btn-primary" disabled={isSubmitting}>
+              {isSubmitting ? 'Verifying...' : 'Continue'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

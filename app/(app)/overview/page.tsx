@@ -1,384 +1,541 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { fetchTeamAnalytics, fetchTeamDetail } from '@/lib/api';
+import RetryError from '@/components/RetryError';
+import { fetchEventMatches, fetchTeamAnalytics } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { useEventContext } from '@/lib/event-context';
+import { formatPercent } from '@/lib/format';
 import { teamAvatarUrl, teamNumberFromKey } from '@/lib/team-utils';
-import type { TeamAnalytics } from '@/lib/types';
+import type { EventMatch, TeamAnalytics } from '@/lib/types';
 
 type SortKey =
   | 'team'
-  | 'name'
   | 'record'
   | 'played'
   | 'scouted'
   | 'rank'
-  | 'opr'
   | 'autoScore'
   | 'autoRate'
+  | 'autoCount'
+  | 'autoAccuracy'
+  | 'autoTowerReliability'
   | 'teleScore'
   | 'teleRate'
+  | 'teleCount'
+  | 'teleAccuracy'
+  | 'teleTowerLevel'
+  | 'teleTowerReliability'
+  | 'intakeDefenseCount'
+  | 'intakeDefenseEffectiveness'
+  | 'scoringDefenseCount'
+  | 'scoringDefenseEffectiveness'
+  | 'intakeDefenseScore'
+  | 'scoringDefenseScore'
   | 'defense'
   | 'failures'
-  | 'humanAccuracy';
+  | 'failureRecovery';
 
-type ScoutedInfo = { scouted: number; total: number };
+type MatchCounts = {
+  played: number;
+  scouted: number;
+};
+
+type Column = {
+  key: SortKey;
+  label: string;
+  render: (team: TeamAnalytics) => ReactNode;
+  sortValue: (team: TeamAnalytics) => number | string;
+  sticky?: boolean;
+};
+
+const essentialColumnKeys: SortKey[] = [
+  'team',
+  'record',
+  'played',
+  'scouted',
+  'rank',
+  'autoScore',
+  'autoAccuracy',
+  'teleScore',
+  'teleAccuracy',
+  'defense',
+  'failures',
+  'failureRecovery',
+];
+
+function getTeamAppearances(team: TeamAnalytics) {
+  return team.tba.wins + team.tba.losses + team.tba.ties;
+}
+
+function buildMatchCounts(matches: EventMatch[]) {
+  const counts: Record<string, MatchCounts> = {};
+
+  matches
+    .filter((match) => match.level === 'qm')
+    .forEach((match) => {
+      const teamKeys = [
+        ...match.alliances.red.teamKeys,
+        ...match.alliances.blue.teamKeys,
+      ];
+      const scoutedTeams = new Set(match.scoutingStatus.robot);
+
+      teamKeys.forEach((teamKey) => {
+        const entry = counts[teamKey] ?? { played: 0, scouted: 0 };
+        entry.played += 1;
+        if (scoutedTeams.has(teamKey)) {
+          entry.scouted += 1;
+        }
+        counts[teamKey] = entry;
+      });
+    });
+
+  return counts;
+}
 
 export default function OverviewPage() {
-  const { selectedEventKey } = useEventContext();
+  const {
+    selectedEvent,
+    selectedEventKey,
+    eventVersion,
+    loading: eventLoading,
+  } = useEventContext();
   const [teams, setTeams] = useState<TeamAnalytics[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown | null>(null);
+  const [countsMap, setCountsMap] = useState<Record<string, MatchCounts>>({});
+  const [countsLoading, setCountsLoading] = useState(false);
+  const [countsError, setCountsError] = useState<unknown | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>('rank');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [scoutedMap, setScoutedMap] = useState<Record<string, ScoutedInfo>>({});
-  const [scoutedStatus, setScoutedStatus] = useState<{
-    loading: boolean;
-    completed: number;
-    total: number;
-  }>({ loading: false, completed: 0, total: 0 });
+  const [showMoreData, setShowMoreData] = useState(false);
 
   useEffect(() => {
+    if (eventLoading) {
+      return;
+    }
+
     const token = getToken();
     if (!selectedEventKey || !token) {
+      setTeams([]);
       setLoading(false);
       return;
     }
+
     let cancelled = false;
-    setScoutedMap({});
-    setScoutedStatus({ loading: false, completed: 0, total: 0 });
     setLoading(true);
     setError(null);
+
     fetchTeamAnalytics(token, selectedEventKey)
       .then((data) => {
-        if (!cancelled) setTeams(data);
+        if (!cancelled) {
+          setTeams(data);
+        }
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load teams.');
+          setError(err);
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       });
+
     return () => {
       cancelled = true;
     };
-  }, [selectedEventKey]);
+  }, [eventLoading, selectedEventKey, eventVersion, reloadNonce]);
 
   useEffect(() => {
-    const token = getToken();
-    if (!selectedEventKey || !token || teams.length === 0) return;
-    if (scoutedStatus.completed >= teams.length && teams.length > 0) return;
-
-    const inlineCounts = teams.filter(
-      (team) => typeof team.scoutedMatches === 'number',
-    );
-
-    if (inlineCounts.length) {
-      setScoutedMap((prev) => {
-        const next = { ...prev };
-        inlineCounts.forEach((team) => {
-          const matchesPlayed = team.tba.wins + team.tba.losses + team.tba.ties;
-          next[team.teamKey] = {
-            scouted: team.scoutedMatches ?? 0,
-            total: matchesPlayed,
-          };
-        });
-        return next;
-      });
-    }
-
-    const missingTeams = teams.filter(
-      (team) => typeof team.scoutedMatches !== 'number',
-    );
-
-    if (missingTeams.length === 0) {
-      setScoutedStatus({
-        loading: false,
-        completed: teams.length,
-        total: teams.length,
-      });
+    if (eventLoading) {
       return;
     }
 
-    if (scoutedStatus.loading) return;
+    const token = getToken();
+    if (!selectedEventKey || !token) {
+      setCountsMap({});
+      setCountsLoading(false);
+      return;
+    }
 
     let cancelled = false;
-    const total = teams.length;
-    setScoutedStatus({ loading: true, completed: inlineCounts.length, total });
+    setCountsLoading(true);
+    setCountsError(null);
 
-    const queue = [...missingTeams];
-    const limit = 5;
-
-    const worker = async () => {
-      while (queue.length && !cancelled) {
-        const team = queue.shift();
-        if (!team) break;
-        try {
-          const detail = await fetchTeamDetail(
-            token,
-            team.teamKey,
-            selectedEventKey,
-          );
-          const qualMatches = detail.matches.filter((match) => match.level === 'qm');
-          const scouted = qualMatches.filter((match) => match.robot).length;
-          const totalMatches = qualMatches.length;
-          if (!cancelled) {
-            setScoutedMap((prev) => ({
-              ...prev,
-              [team.teamKey]: { scouted, total: totalMatches },
-            }));
-          }
-        } catch {
-          if (!cancelled) {
-            const matchesPlayed =
-              team.tba.wins + team.tba.losses + team.tba.ties;
-            setScoutedMap((prev) => ({
-              ...prev,
-              [team.teamKey]: { scouted: 0, total: matchesPlayed },
-            }));
-          }
-        } finally {
-          if (!cancelled) {
-            setScoutedStatus((prev) => ({
-              ...prev,
-              completed: Math.min(prev.completed + 1, total),
-            }));
-          }
+    fetchEventMatches(token, selectedEventKey)
+      .then((matches) => {
+        if (!cancelled) {
+          setCountsMap(buildMatchCounts(matches));
         }
-      }
-    };
-
-    Promise.all(Array.from({ length: limit }, () => worker())).finally(() => {
-      if (!cancelled) {
-        setScoutedStatus((prev) => ({
-          ...prev,
-          loading: false,
-          completed: total,
-        }));
-      }
-    });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCountsMap({});
+          setCountsError(err);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCountsLoading(false);
+        }
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [selectedEventKey, teams, scoutedStatus.loading, scoutedStatus.completed]);
+  }, [eventLoading, selectedEventKey, eventVersion, reloadNonce]);
+
+  const getPlayedValue = (team: TeamAnalytics) =>
+    countsMap[team.teamKey]?.played ?? getTeamAppearances(team);
+
+  const getScoutedValue = (team: TeamAnalytics) =>
+    countsMap[team.teamKey]?.scouted ?? team.scoutedMatches ?? 0;
 
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
       setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortKey(key);
-      setSortDir('desc');
+      return;
     }
+
+    setSortKey(key);
+    setSortDir('asc');
   };
 
-  const getSortValue = (team: TeamAnalytics) => {
-    const played = team.tba.wins + team.tba.losses + team.tba.ties;
-    const scoutedInfo = scoutedMap[team.teamKey];
-    const scouted = scoutedInfo?.scouted ?? 0;
-    switch (sortKey) {
-      case 'team':
-        return Number(teamNumberFromKey(team.teamKey));
-      case 'name':
-        return team.name;
-      case 'record':
-        return team.tba.wins - team.tba.losses + team.tba.ties * 0.5;
-      case 'played':
-        return played;
-      case 'scouted':
-        return scouted;
-      case 'rank':
-        return team.tba.rank;
-      case 'opr':
-        return team.tba.opr;
-      case 'autoScore':
-        return team.robot.autoCycleScore;
-      case 'autoRate':
-        return team.robot.autoCycleRate;
-      case 'teleScore':
-        return team.robot.teleCycleScore;
-      case 'teleRate':
-        return team.robot.teleCycleRate;
-      case 'defense':
-        return team.robot.totalDefenseScore;
-      case 'failures':
-        return team.robot.failureCount;
-      case 'humanAccuracy':
-        return team.humanPlayer.accuracy;
-      default:
-        return team.tba.rank;
+  const columns: Column[] = [
+    {
+      key: 'team',
+      label: 'Team',
+      sticky: true,
+      render: (team) => (
+        <div className="team-cell">
+          <img className="team-avatar" src={teamAvatarUrl(team.teamKey)} alt="" />
+          <Link href={`/teams/${team.teamKey}`}>
+            <strong>{teamNumberFromKey(team.teamKey)}</strong>
+          </Link>
+        </div>
+      ),
+      sortValue: (team) => Number(teamNumberFromKey(team.teamKey)),
+    },
+    {
+      key: 'record',
+      label: 'Record',
+      render: (team) => `${team.tba.wins}-${team.tba.losses}-${team.tba.ties}`,
+      sortValue: (team) => team.tba.wins - team.tba.losses + team.tba.ties * 0.5,
+    },
+    {
+      key: 'played',
+      label: 'Played',
+      render: (team) => getPlayedValue(team),
+      sortValue: (team) => getPlayedValue(team),
+    },
+    {
+      key: 'scouted',
+      label: 'Scouted',
+      render: (team) => `${getScoutedValue(team)}/${getPlayedValue(team)}`,
+      sortValue: (team) => getScoutedValue(team),
+    },
+    {
+      key: 'rank',
+      label: 'Rank',
+      render: (team) => `#${team.tba.rank}`,
+      sortValue: (team) => team.tba.rank,
+    },
+    {
+      key: 'autoScore',
+      label: 'Auto Score',
+      render: (team) => team.robot.autoCycleScore.toFixed(1),
+      sortValue: (team) => team.robot.autoCycleScore,
+    },
+    {
+      key: 'autoRate',
+      label: 'Auto Rate',
+      render: (team) => team.robot.autoCycleRate.toFixed(1),
+      sortValue: (team) => team.robot.autoCycleRate,
+    },
+    {
+      key: 'autoCount',
+      label: 'Auto Count',
+      render: (team) => team.robot.autoCycleCountAvg.toFixed(1),
+      sortValue: (team) => team.robot.autoCycleCountAvg,
+    },
+    {
+      key: 'autoAccuracy',
+      label: 'Auto Accuracy',
+      render: (team) => formatPercent(team.robot.autoCycleAccuracy),
+      sortValue: (team) => team.robot.autoCycleAccuracy,
+    },
+    {
+      key: 'autoTowerReliability',
+      label: 'Auto Tower',
+      render: (team) => formatPercent(team.robot.autoTowerReliability),
+      sortValue: (team) => team.robot.autoTowerReliability,
+    },
+    {
+      key: 'teleScore',
+      label: 'Tele Score',
+      render: (team) => team.robot.teleCycleScore.toFixed(1),
+      sortValue: (team) => team.robot.teleCycleScore,
+    },
+    {
+      key: 'teleRate',
+      label: 'Tele Rate',
+      render: (team) => team.robot.teleCycleRate.toFixed(1),
+      sortValue: (team) => team.robot.teleCycleRate,
+    },
+    {
+      key: 'teleCount',
+      label: 'Tele Count',
+      render: (team) => team.robot.teleCycleCountAvg.toFixed(1),
+      sortValue: (team) => team.robot.teleCycleCountAvg,
+    },
+    {
+      key: 'teleAccuracy',
+      label: 'Tele Accuracy',
+      render: (team) => formatPercent(team.robot.teleCycleAccuracy),
+      sortValue: (team) => team.robot.teleCycleAccuracy,
+    },
+    {
+      key: 'teleTowerLevel',
+      label: 'Tele Tower',
+      render: (team) => team.robot.teleTowerLevel,
+      sortValue: (team) => team.robot.teleTowerLevel,
+    },
+    {
+      key: 'teleTowerReliability',
+      label: 'Tele Rel.',
+      render: (team) => formatPercent(team.robot.teleTowerReliability),
+      sortValue: (team) => team.robot.teleTowerReliability,
+    },
+    {
+      key: 'intakeDefenseCount',
+      label: 'Intake Cnt',
+      render: (team) => team.robot.intakeDefenseCount.toFixed(0),
+      sortValue: (team) => team.robot.intakeDefenseCount,
+    },
+    {
+      key: 'intakeDefenseEffectiveness',
+      label: 'Intake Eff',
+      render: (team) => team.robot.intakeDefenseEffectiveness.toFixed(1),
+      sortValue: (team) => team.robot.intakeDefenseEffectiveness,
+    },
+    {
+      key: 'scoringDefenseCount',
+      label: 'Scoring Cnt',
+      render: (team) => team.robot.scoringDefenseCount.toFixed(0),
+      sortValue: (team) => team.robot.scoringDefenseCount,
+    },
+    {
+      key: 'scoringDefenseEffectiveness',
+      label: 'Scoring Eff',
+      render: (team) => team.robot.scoringDefenseEffectiveness.toFixed(1),
+      sortValue: (team) => team.robot.scoringDefenseEffectiveness,
+    },
+    {
+      key: 'intakeDefenseScore',
+      label: 'Intake Def',
+      render: (team) => team.robot.intakeDefenseScore.toFixed(1),
+      sortValue: (team) => team.robot.intakeDefenseScore,
+    },
+    {
+      key: 'scoringDefenseScore',
+      label: 'Scoring Def',
+      render: (team) => team.robot.scoringDefenseScore.toFixed(1),
+      sortValue: (team) => team.robot.scoringDefenseScore,
+    },
+    {
+      key: 'defense',
+      label: 'Defense',
+      render: (team) => team.robot.totalDefenseScore.toFixed(1),
+      sortValue: (team) => team.robot.totalDefenseScore,
+    },
+    {
+      key: 'failures',
+      label: 'Failure Count',
+      render: (team) => team.robot.failureCount.toFixed(0),
+      sortValue: (team) => team.robot.failureCount,
+    },
+    {
+      key: 'failureRecovery',
+      label: 'Recovery',
+      render: (team) => formatPercent(team.robot.failureRecovery),
+      sortValue: (team) => team.robot.failureRecovery,
+    },
+  ];
+
+  const visibleColumns = columns.filter(
+    (column) => showMoreData || essentialColumnKeys.includes(column.key),
+  );
+
+  useEffect(() => {
+    if (showMoreData) {
+      return;
     }
-  };
 
-  const sortedTeams = (() => {
-    const list = [...teams];
-    const compare = (a: TeamAnalytics, b: TeamAnalytics) => {
-      const aVal = getSortValue(a);
-      const bVal = getSortValue(b);
-      if (typeof aVal === 'string' && typeof bVal === 'string') {
-        return aVal.localeCompare(bVal);
-      }
-      return Number(aVal) - Number(bVal);
-    };
-    list.sort(compare);
-    return sortDir === 'asc' ? list : list.reverse();
-  })();
+    if (!essentialColumnKeys.includes(sortKey)) {
+      setSortKey('rank');
+      setSortDir('asc');
+    }
+  }, [showMoreData, sortKey]);
 
-  const scoutedStatusText = scoutedStatus.loading
-    ? `Loading scouted matches: ${scoutedStatus.completed}/${scoutedStatus.total}`
-    : scoutedStatus.total
-      ? `Scouted matches loaded (${scoutedStatus.total} teams)`
+  const activeColumn =
+    visibleColumns.find((column) => column.key === sortKey) ??
+    columns.find((column) => column.key === sortKey) ??
+    visibleColumns.find((column) => column.key === 'rank')!;
+
+  const sortedTeams = [...teams].sort((left, right) => {
+    const leftValue = activeColumn.sortValue(left);
+    const rightValue = activeColumn.sortValue(right);
+
+    if (typeof leftValue === 'string' && typeof rightValue === 'string') {
+      const stringCompare = leftValue.localeCompare(rightValue, undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      });
+      return sortDir === 'asc' ? stringCompare : -stringCompare;
+    }
+
+    const numberCompare = Number(leftValue) - Number(rightValue);
+    return sortDir === 'asc' ? numberCompare : -numberCompare;
+  });
+
+  const totalGamesPlayed = teams.reduce(
+    (sum, team) => sum + getPlayedValue(team),
+    0,
+  );
+  const totalGamesScouted = teams.reduce(
+    (sum, team) => sum + getScoutedValue(team),
+    0,
+  );
+  const scoutingCoverage =
+    totalGamesPlayed > 0 ? totalGamesScouted / totalGamesPlayed : 0;
+
+  const sortIndicator = (key: SortKey) =>
+    sortKey === key ? (sortDir === 'asc' ? '↑' : '↓') : '↕';
+  const pageLoading = eventLoading || loading;
+  const scoutingStatusText = countsLoading
+    ? 'Updating counts...'
+    : countsError
+      ? 'Using fallback counts.'
       : '';
 
   return (
-    <div className="page">
-      <header className="page-header">
-        <h1>Event Overview</h1>
-        <p>Sortable team analytics for the selected event.</p>
-      </header>
+    <div className="page overview-page">
+      <section className="surface-card overview-hero animate-in">
+        <div className="overview-hero-copy">
+          <span className="hero-kicker">Overview</span>
+          <h1>{selectedEvent?.name ?? 'Select an event to begin'}</h1>
+        </div>
 
-      {!selectedEventKey ? (
-        <div className="helper-text">Select an event to load teams.</div>
-      ) : null}
-
-      {scoutedStatusText ? (
-        <div className="helper-text">{scoutedStatusText}</div>
-      ) : null}
-
-      {loading ? <div className="loading">Loading teams...</div> : null}
-      {error ? <div className="error">{error}</div> : null}
-
-      {!loading && !error ? (
-        <div className="table-card animate-in">
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>
-                    <button onClick={() => handleSort('team')}>
-                      Team {sortKey === 'team' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('name')}>
-                      Name {sortKey === 'name' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('record')}>
-                      Record {sortKey === 'record' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('played')}>
-                      Matches Played {sortKey === 'played' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('scouted')}>
-                      Matches Scouted {sortKey === 'scouted' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('rank')}>
-                      Rank {sortKey === 'rank' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('opr')}>
-                      OPR {sortKey === 'opr' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('autoScore')}>
-                      Auto Score {sortKey === 'autoScore' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('autoRate')}>
-                      Auto Rate {sortKey === 'autoRate' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('teleScore')}>
-                      Tele Score {sortKey === 'teleScore' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('teleRate')}>
-                      Tele Rate {sortKey === 'teleRate' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('defense')}>
-                      Defense {sortKey === 'defense' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('failures')}>
-                      Failures {sortKey === 'failures' ? (sortDir === 'asc' ? '^' : 'v') : ''}
-                    </button>
-                  </th>
-                  <th>
-                    <button onClick={() => handleSort('humanAccuracy')}>
-                      Human Accuracy{' '}
-                      {sortKey === 'humanAccuracy'
-                        ? sortDir === 'asc'
-                          ? '^'
-                          : 'v'
-                        : ''}
-                    </button>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedTeams.map((team) => {
-                  const played = team.tba.wins + team.tba.losses + team.tba.ties;
-                  const scoutedInfo = scoutedMap[team.teamKey];
-                  const scouted = scoutedInfo?.scouted ?? 0;
-                  const scoutedTotal = scoutedInfo?.total ?? played;
-                  return (
-                    <tr key={team.teamKey}>
-                      <td>
-                        <div className="team-cell">
-                          <img
-                            className="team-avatar"
-                            src={teamAvatarUrl(team.teamKey)}
-                            alt=""
-                          />
-                          <Link href={`/teams/${team.teamKey}`}>
-                            <strong>{teamNumberFromKey(team.teamKey)}</strong>
-                          </Link>
-                        </div>
-                      </td>
-                      <td>{team.name}</td>
-                      <td>
-                        {team.tba.wins}-{team.tba.losses}-{team.tba.ties}
-                      </td>
-                      <td>{played}</td>
-                      <td>
-                        {scouted}/{scoutedTotal}
-                      </td>
-                      <td>#{team.tba.rank}</td>
-                      <td>{team.tba.opr.toFixed(1)}</td>
-                      <td>{team.robot.autoCycleScore.toFixed(1)}</td>
-                      <td>{team.robot.autoCycleRate.toFixed(1)}</td>
-                      <td>{team.robot.teleCycleScore.toFixed(1)}</td>
-                      <td>{team.robot.teleCycleRate.toFixed(1)}</td>
-                      <td>{team.robot.totalDefenseScore.toFixed(1)}</td>
-                      <td>{team.robot.failureCount.toFixed(0)}</td>
-                      <td>{(team.humanPlayer.accuracy * 100).toFixed(0)}%</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <div className="overview-hero-stats">
+          <div className="overview-hero-stat">
+            <span>Teams</span>
+            <strong>{teams.length}</strong>
+          </div>
+          <div className="overview-hero-stat">
+            <span>Played</span>
+            <strong>{totalGamesPlayed}</strong>
+          </div>
+          <div className="overview-hero-stat">
+            <span>Scouted</span>
+            <strong>{totalGamesScouted}</strong>
+          </div>
+          <div className="overview-hero-stat overview-hero-stat-accent">
+            <span>Coverage</span>
+            <strong>{formatPercent(scoutingCoverage)}</strong>
           </div>
         </div>
+      </section>
+
+      {!pageLoading && !selectedEventKey ? (
+        <div className="surface-card empty-state">
+          <strong>Select an event.</strong>
+        </div>
+      ) : null}
+
+      {pageLoading ? <div className="loading">Loading...</div> : null}
+      {!pageLoading && error ? (
+        <RetryError
+          error={error}
+          onRetry={() => setReloadNonce((value) => value + 1)}
+        />
+      ) : null}
+
+      {!pageLoading && !error && selectedEventKey ? (
+        <>
+          {teams.length === 0 ? (
+            <div className="surface-card empty-state">
+              <strong>No teams returned for this event.</strong>
+            </div>
+          ) : (
+            <section className="surface-card table-shell animate-in">
+              <div className="section-heading">
+                <div>
+                  <div className="section-kicker">Teams</div>
+                  <h2>Team Stats</h2>
+                </div>
+                <div className="table-controls">
+                  <label className="data-toggle">
+                    <input
+                      type="checkbox"
+                      checked={showMoreData}
+                      onChange={(event) => setShowMoreData(event.target.checked)}
+                    />
+                    <span className="data-toggle-track" aria-hidden="true">
+                      <span className="data-toggle-thumb" />
+                    </span>
+                    <span className="data-toggle-copy">More stats</span>
+                  </label>
+                </div>
+              </div>
+
+              {scoutingStatusText ? (
+                <span className="section-note">{scoutingStatusText}</span>
+              ) : null}
+
+              <div className="table-card">
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        {visibleColumns.map((column) => (
+                          <th
+                            key={column.key}
+                            className={column.sticky ? 'sticky-cell' : undefined}
+                          >
+                            <button type="button" onClick={() => handleSort(column.key)}>
+                              {column.label}{' '}
+                              <span className="sort-indicator">
+                                {sortIndicator(column.key)}
+                              </span>
+                            </button>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedTeams.map((team) => (
+                        <tr key={team.teamKey}>
+                          {visibleColumns.map((column) => (
+                            <td
+                              key={column.key}
+                              className={column.sticky ? 'sticky-cell' : undefined}
+                            >
+                              {column.render(team)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          )}
+        </>
       ) : null}
     </div>
   );

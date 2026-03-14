@@ -14,9 +14,10 @@ export default function HomePage() {
 
   return (
     <div className="page-center">
-      <div className="card login-card animate-in">
-        <h1>Insight</h1>
-        <p className="muted">Loading your workspace...</p>
+      <div className="card loading-panel animate-in">
+        <div className="hero-kicker">Insight</div>
+        <h1>Loading your workspace...</h1>
+        <p className="muted">Checking your session and opening the latest view.</p>
       </div>
     </div>
   );

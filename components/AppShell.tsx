@@ -1,20 +1,29 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import EventPicker from '@/components/EventPicker';
+import RetryError from '@/components/RetryError';
 import { clearToken, getToken } from '@/lib/auth';
 import { EventProvider, useEventContext } from '@/lib/event-context';
+import { formatEventDate } from '@/lib/format';
 
-const navItems = [{ label: 'Overview', href: '/overview' }];
-
-function ShellFrame({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
+function ShellFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [navOpen, setNavOpen] = useState(false);
-  const [eventQuery, setEventQuery] = useState('');
-  const { events, selectedEvent, selectedEventKey, setEventKey, loading, error } =
-    useEventContext();
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const {
+    events,
+    selectedEvent,
+    selectedEventKey,
+    setEventKey,
+    refreshEvents,
+    loading,
+    error,
+  } = useEventContext();
 
   useEffect(() => {
     if (!getToken()) {
@@ -22,96 +31,194 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
     }
   }, [router]);
 
-  const pageTitle = pathname?.startsWith('/teams') ? 'Team Detail' : 'Overview';
-  const normalizedQuery = eventQuery.trim().toLowerCase();
-  const filteredEvents = normalizedQuery
-    ? events.filter((event) => {
-        const name = event.name.toLowerCase();
-        const key = event.eventKey.toLowerCase();
-        return name.includes(normalizedQuery) || key.includes(normalizedQuery);
-      })
-    : events;
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
 
-  const handleLogout = () => {
-    clearToken();
-    router.replace('/login');
+    const syncViewport = () => {
+      setIsMobileViewport(window.innerWidth <= 960);
+    };
+
+    syncViewport();
+    window.addEventListener('resize', syncViewport);
+
+    return () => {
+      window.removeEventListener('resize', syncViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
+
+  const toggleNavigation = () => {
+    if (isMobileViewport) {
+      setNavOpen((value) => !value);
+      return;
+    }
+
+    setNavCollapsed((value) => !value);
   };
 
+  const closeNavigation = () => {
+    if (isMobileViewport) {
+      setNavOpen(false);
+      return;
+    }
+
+    setNavCollapsed(true);
+  };
+
+  const onTeamPage = pathname?.startsWith('/teams/') ?? false;
+  const pageTitle = onTeamPage ? 'Team' : 'Overview';
+  const menuButtonLabel = isMobileViewport
+    ? navOpen
+      ? 'Close'
+      : 'Menu'
+    : navCollapsed
+      ? 'Menu'
+      : 'Hide';
+
   return (
-    <div className="app-shell">
-      <aside className={`nav ${navOpen ? 'open' : ''}`}>
+    <div className={`app-shell ${navCollapsed ? 'nav-collapsed' : ''}`}>
+      <aside
+        className={`nav ${navOpen ? 'open' : ''} ${
+          navCollapsed ? 'nav-desktop-hidden' : ''
+        }`}
+      >
         <div className="nav-header">
-          <div className="nav-title">Insight</div>
-          <label className="helper-text">Event</label>
-          <input
-            className="event-search"
-            placeholder="Search events"
-            value={eventQuery}
-            onChange={(event) => setEventQuery(event.target.value)}
+          <div>
+            <div className="nav-eyebrow">Future Martians</div>
+            <div className="nav-title">InSight</div>
+          </div>
+          {isMobileViewport ? (
+            <button
+              type="button"
+              className="nav-close"
+              onClick={closeNavigation}
+              aria-label="Close navigation"
+            >
+              <span className="nav-close-icon" aria-hidden="true">
+                ×
+              </span>
+              <span className="nav-close-copy">Close</span>
+            </button>
+          ) : null}
+        </div>
+
+        <section className="nav-section nav-section-emphasis">
+          <div className="nav-section-heading">
+            <span className="nav-section-title">Event</span>
+            <span className="nav-section-value">{events.length} loaded</span>
+          </div>
+          <EventPicker
+            events={events}
+            selectedEventKey={selectedEventKey}
+            loading={loading}
+            onSelect={setEventKey}
           />
-          <select
-            value={selectedEventKey ?? ''}
-            onChange={(event) => {
-              if (event.target.value) {
-                setEventKey(event.target.value);
-              }
+          {error ? (
+            <RetryError
+              compact
+              error={error}
+              onRetry={() => void refreshEvents()}
+            />
+          ) : null}
+        </section>
+
+        <section className="nav-section">
+          <div className="nav-section-heading">
+            <span className="nav-section-title">Pages</span>
+          </div>
+          <nav className="nav-links">
+            <Link
+              href="/overview"
+              className={`nav-link ${
+                pathname === '/overview' || onTeamPage ? 'active' : ''
+              }`}
+            >
+              <span className="nav-link-copy">
+                <strong>Overview</strong>
+              </span>
+            </Link>
+          </nav>
+        </section>
+
+        <section className="nav-selected-event">
+          <span className="nav-selected-kicker">Event</span>
+          <strong>{selectedEvent?.name ?? 'No event selected'}</strong>
+          <span>
+            {selectedEvent
+              ? `${selectedEvent.eventKey} • ${formatEventDate(selectedEvent.startDate)}`
+              : 'Select an event'}
+          </span>
+        </section>
+
+        <div className="nav-footer">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => void refreshEvents()}
+            disabled={loading}
+          >
+            {loading ? 'Refreshing...' : 'Refresh events'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              clearToken();
+              router.replace('/login');
             }}
           >
-            {loading ? (
-              <option value="">Loading events...</option>
-            ) : null}
-            {!loading && filteredEvents.length === 0 ? (
-              <option value="">
-                {events.length === 0 ? 'No events found' : 'No matching events'}
-              </option>
-            ) : null}
-            {filteredEvents.map((event) => (
-              <option key={event.eventKey} value={event.eventKey}>
-                {event.name}
-              </option>
-            ))}
-          </select>
-          {error ? <div className="error">{error}</div> : null}
-        </div>
-        <nav className="nav-links">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              className={`nav-link ${pathname === item.href ? 'active' : ''}`}
-              href={item.href}
-              onClick={() => setNavOpen(false)}
-            >
-              <span>{item.label}</span>
-              <span>{'>'}</span>
-            </Link>
-          ))}
-        </nav>
-        <div className="nav-footer">
-          <button className="btn btn-ghost" onClick={handleLogout}>
             Log out
           </button>
         </div>
       </aside>
 
       <div className="content">
-        <div className="topbar">
-          <button className="menu-toggle" onClick={() => setNavOpen(true)}>
-            Menu
-          </button>
-          <div className="topbar-title">{pageTitle}</div>
-          {selectedEvent ? (
-            <div className="topbar-pill">{selectedEvent.name}</div>
-          ) : null}
-          <div className="topbar-spacer" />
-          <button className="btn btn-secondary" onClick={handleLogout}>
-            Log out
-          </button>
-        </div>
-        <main>{children}</main>
+        <header className="workspace-topbar">
+          <div className="workspace-heading">
+            <button
+              type="button"
+              className="menu-toggle"
+              onClick={toggleNavigation}
+              aria-label={menuButtonLabel}
+            >
+              <span className="menu-toggle-icon" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="menu-toggle-copy">
+                <strong>{menuButtonLabel}</strong>
+              </span>
+            </button>
+            <div>
+              <div className="workspace-title">{pageTitle}</div>
+            </div>
+          </div>
+
+          <div className="workspace-actions">
+            <div className="workspace-badge">
+              <span>Event</span>
+              <strong>{selectedEvent?.name ?? 'No event selected'}</strong>
+              <small>
+                {selectedEvent
+                  ? `${selectedEvent.eventKey} • ${formatEventDate(selectedEvent.startDate)}`
+                  : 'Select an event'}
+              </small>
+            </div>
+          </div>
+        </header>
+
+        <main className="workspace-main">{children}</main>
       </div>
 
       {navOpen ? (
         <button
+          type="button"
           className="nav-overlay"
           aria-label="Close navigation"
           onClick={() => setNavOpen(false)}
@@ -121,7 +228,7 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function AppShell({ children }: { children: ReactNode }) {
   return (
     <EventProvider>
       <ShellFrame>{children}</ShellFrame>

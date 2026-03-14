@@ -4,6 +4,28 @@ export type Event = {
   startDate: string;
 };
 
+export type EventAlliance = {
+  teamKeys: string[];
+  score: number | null;
+};
+
+export type EventMatch = {
+  eventKey: string;
+  matchKey: string;
+  matchNumber: number;
+  setNumber: number;
+  level: string;
+  alliances: {
+    red: EventAlliance;
+    blue: EventAlliance;
+  };
+  scoutingStatus: {
+    robot: string[];
+    ai: string[];
+    humanPlayer: string[];
+  };
+};
+
 export type TeamAnalytics = {
   name: string;
   teamKey: string;

@@ -1,7 +1,25 @@
-import type { Event, TeamAnalytics, TeamDetail, TeamMatchAnalytics } from '@/lib/types';
+import type {
+  Event,
+  EventMatch,
+  TeamAnalytics,
+  TeamDetail,
+  TeamMatchAnalytics,
+} from '@/lib/types';
+import {
+  AppException,
+  ForbiddenException,
+  NetworkException,
+  NotFoundException,
+  OutdatedVersionException,
+  ServerException,
+  TimeoutException,
+  UnauthorizedException,
+  UnknownException,
+  ValidationException,
+} from '@/lib/errors';
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ?? 'https://insight-api.futuremartians.org/';
+const API_BASE = '/api/insight';
+const REQUEST_TIMEOUT_MS = 20000;
 
 const DEFAULT_HEADERS = {
   Accept: 'application/json',
@@ -11,9 +29,8 @@ const DEFAULT_HEADERS = {
 const USERNAME = 'insight_user';
 
 function buildUrl(path: string) {
-  const base = API_BASE.endsWith('/') ? API_BASE.slice(0, -1) : API_BASE;
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  return `${base}${cleanPath}`;
+  return `${API_BASE}${cleanPath}`;
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -44,78 +61,168 @@ function extractErrorMessage(data: unknown): string | null {
   return null;
 }
 
+function toAppException(
+  status: number,
+  message: string | null,
+  proxyError: string | null,
+) {
+  if (proxyError === 'network') {
+    return new NetworkException(message ?? 'No internet connection');
+  }
+
+  if (proxyError === 'timeout') {
+    return new TimeoutException(message ?? 'Connection timed out');
+  }
+
+  if (status === 400) {
+    return new OutdatedVersionException(message ?? 'App version is outdated', status);
+  }
+
+  if (status === 401) {
+    return new UnauthorizedException(message ?? 'Unauthorized request', status);
+  }
+
+  if (status === 403) {
+    return new ForbiddenException(
+      message ?? 'You do not have permission to perform this action',
+      status,
+    );
+  }
+
+  if (status === 404) {
+    return new NotFoundException(
+      message ?? 'Requested resource was not found',
+      status,
+    );
+  }
+
+  if (status === 422) {
+    return new ValidationException(message ?? 'Invalid request data', status);
+  }
+
+  if (status >= 500) {
+    return new ServerException(message ?? 'Server error, please try again later', status);
+  }
+
+  return new UnknownException(message ?? 'Request failed', status);
+}
+
+function normalizeThrownError(error: unknown): AppException {
+  if (error instanceof AppException) {
+    return error;
+  }
+
+  if (error instanceof Error && error.name === 'AbortError') {
+    return new TimeoutException();
+  }
+
+  if (error instanceof TypeError) {
+    return new NetworkException();
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return new UnknownException(error.message);
+  }
+
+  return new UnknownException();
+}
+
+async function parseErrorResponse(response: Response) {
+  try {
+    const data = await response.json();
+    return extractErrorMessage(data);
+  } catch {
+    try {
+      const text = await response.text();
+      return extractErrorMessage(text);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function fetchWithTimeout(input: string, init?: RequestInit) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 async function apiFetch<T>(
   path: string,
   token: string,
   options?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(buildUrl(path), {
-    ...options,
-    headers: {
-      ...DEFAULT_HEADERS,
-      ...(options?.headers ?? {}),
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  try {
+    const response = await fetchWithTimeout(buildUrl(path), {
+      ...options,
+      headers: {
+        ...DEFAULT_HEADERS,
+        ...(options?.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+      },
+      cache: 'no-store',
+    });
 
-  if (!response.ok) {
-    let message = `Request failed (${response.status})`;
-    try {
-      const data = await response.json();
-      message = extractErrorMessage(data) ?? message;
-    } catch {
-      try {
-        const text = await response.text();
-        message = extractErrorMessage(text) ?? message;
-      } catch {
-        // ignore
-      }
+    if (!response.ok) {
+      const message = await parseErrorResponse(response);
+      throw toAppException(
+        response.status,
+        message,
+        response.headers.get('x-insight-error'),
+      );
     }
-    throw new Error(message);
-  }
 
-  if (response.status === 204) {
-    return {} as T;
-  }
+    if (response.status === 204) {
+      return {} as T;
+    }
 
-  return (await response.json()) as T;
+    return (await response.json()) as T;
+  } catch (error) {
+    throw normalizeThrownError(error);
+  }
 }
 
 export async function loginWithCode(code: string): Promise<string> {
-  const response = await fetch(buildUrl('auth/token'), {
-    method: 'POST',
-    headers: {
-      ...DEFAULT_HEADERS,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      username: USERNAME,
-      password: code,
-    }),
-  });
+  try {
+    const response = await fetchWithTimeout(buildUrl('auth/token'), {
+      method: 'POST',
+      headers: {
+        ...DEFAULT_HEADERS,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        username: USERNAME,
+        password: code,
+      }).toString(),
+      cache: 'no-store',
+    });
 
-  if (!response.ok) {
-    let message = `Login failed (${response.status})`;
-    try {
-      const data = await response.json();
-      message = extractErrorMessage(data) ?? message;
-    } catch {
-      try {
-        const text = await response.text();
-        message = extractErrorMessage(text) ?? message;
-      } catch {
-        // ignore
-      }
+    if (!response.ok) {
+      const message = await parseErrorResponse(response);
+      throw toAppException(
+        response.status,
+        message,
+        response.headers.get('x-insight-error'),
+      );
     }
-    throw new Error(message);
-  }
 
-  const data = (await response.json()) as Record<string, unknown>;
-  const token = data.access_token;
-  if (typeof token !== 'string') {
-    throw new Error('Token missing in login response.');
+    const data = (await response.json()) as Record<string, unknown>;
+    const token = data.access_token;
+    if (typeof token !== 'string') {
+      throw new UnknownException('Token missing in login response.');
+    }
+    return token;
+  } catch (error) {
+    throw normalizeThrownError(error);
   }
-  return token;
 }
 
 export async function fetchEvents(token: string): Promise<Event[]> {
@@ -131,6 +238,65 @@ export async function fetchEvents(token: string): Promise<Event[]> {
         (item as Record<string, unknown>).startDate,
     ),
   }));
+}
+
+function parseAlliance(raw: unknown) {
+  const data = (raw as Record<string, unknown>) ?? {};
+  return {
+    teamKeys: Array.isArray(data.team_keys)
+      ? data.team_keys
+          .filter((teamKey): teamKey is string => typeof teamKey === 'string')
+      : [],
+    score:
+      typeof data.score === 'number' && !Number.isNaN(data.score)
+        ? data.score
+        : null,
+  };
+}
+
+function parseEventMatch(raw: Record<string, unknown>): EventMatch {
+  const alliances = (raw.alliances as Record<string, unknown>) ?? {};
+  const scoutingStatus = (raw.scouting_status as Record<string, unknown>) ?? {};
+
+  return {
+    eventKey: toString(raw.event_key ?? raw.eventKey),
+    matchKey: toString(raw.match_key ?? raw.matchKey),
+    matchNumber: toNumber(raw.match_number),
+    setNumber: toNumber(raw.set_number),
+    level: toString(raw.level),
+    alliances: {
+      red: parseAlliance(alliances.red),
+      blue: parseAlliance(alliances.blue),
+    },
+    scoutingStatus: {
+      robot: Array.isArray(scoutingStatus.robot)
+        ? scoutingStatus.robot.filter(
+            (teamKey): teamKey is string => typeof teamKey === 'string',
+          )
+        : [],
+      ai: Array.isArray(scoutingStatus.ai)
+        ? scoutingStatus.ai.filter(
+            (teamKey): teamKey is string => typeof teamKey === 'string',
+          )
+        : [],
+      humanPlayer: Array.isArray(scoutingStatus.human_player)
+        ? scoutingStatus.human_player.filter(
+            (teamKey): teamKey is string => typeof teamKey === 'string',
+          )
+        : [],
+    },
+  };
+}
+
+export async function fetchEventMatches(
+  token: string,
+  eventKey: string,
+): Promise<EventMatch[]> {
+  const data = await apiFetch<unknown[]>(
+    `/events/${encodeURIComponent(eventKey)}/matches`,
+    token,
+  );
+  return data.map((item) => parseEventMatch(item as Record<string, unknown>));
 }
 
 function parseTeamAnalytics(raw: Record<string, unknown>): TeamAnalytics {
@@ -150,9 +316,6 @@ function parseTeamAnalytics(raw: Record<string, unknown>): TeamAnalytics {
     (raw.matches_scouted as number | undefined);
   const scoutedMatches =
     typeof scoutedRaw === 'number' ? scoutedRaw : undefined;
-
-  const passing = (raw.passing as Record<string, unknown>) ?? {};
-  const mobility = (raw.mobility as Record<string, unknown>) ?? {};
 
   return {
     name: toString(raw.name),
@@ -237,6 +400,8 @@ function parseMatchRobot(raw: Record<string, unknown>) {
   const offense = (defense.offense as Record<string, unknown>) ?? {};
   const failures = (raw.failures as Record<string, unknown>) ?? {};
   const instances = (failures.instances as Record<string, unknown>) ?? {};
+  const passing = (raw.passing as Record<string, unknown>) ?? {};
+  const mobility = (raw.mobility as Record<string, unknown>) ?? {};
 
   return {
     auto: parseMatchPhase((raw.auto as Record<string, unknown>) ?? {}),
