@@ -53,10 +53,10 @@ type Column = {
 
 const essentialColumnKeys: SortKey[] = [
   'team',
+  'rank',
   'record',
   'played',
   'scouted',
-  'rank',
   'autoScore',
   'autoAccuracy',
   'teleScore',
@@ -176,15 +176,29 @@ export default function OverviewPage() {
       key: 'team',
       label: 'Team',
       sticky: true,
-      render: (team) => (
-        <div className="team-cell">
-          <img className="team-avatar" src={teamAvatarUrl(team.teamKey)} alt="" />
-          <Link href={`/teams/${team.teamKey}`}>
-            <strong>{teamNumberFromKey(team.teamKey)}</strong>
-          </Link>
-        </div>
-      ),
+      render: (team) => {
+        const teamNumber = teamNumberFromKey(team.teamKey);
+
+        return (
+          <div className="team-cell">
+            <img className="team-avatar" src={teamAvatarUrl(team.teamKey)} alt="" />
+            <Link
+              href={`/teams/${team.teamKey}`}
+              className="team-number-link"
+              title={`Open team ${teamNumber}`}
+            >
+              <strong>{teamNumber}</strong>
+            </Link>
+          </div>
+        );
+      },
       sortValue: (team) => Number(teamNumberFromKey(team.teamKey)),
+    },
+    {
+      key: 'rank',
+      label: 'Rank',
+      render: (team) => `#${team.tba.rank}`,
+      sortValue: (team) => team.tba.rank,
     },
     {
       key: 'record',
@@ -204,12 +218,6 @@ export default function OverviewPage() {
       render: (team) =>
         `${getScoutedValue(team, countsMap)}/${getPlayedValue(team, countsMap)}`,
       sortValue: (team) => getScoutedValue(team, countsMap),
-    },
-    {
-      key: 'rank',
-      label: 'Rank',
-      render: (team) => `#${team.tba.rank}`,
-      sortValue: (team) => team.tba.rank,
     },
     {
       key: 'autoScore',

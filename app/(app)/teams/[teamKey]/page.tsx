@@ -325,7 +325,7 @@ export default function TeamDetailPage() {
 
     return ((secondAverage - firstAverage) / Math.max(1, Math.abs(firstAverage))) * 100;
   })();
-  const recentMatches = [...matches].slice(-6).reverse();
+  const displayedMatches = [...matches].reverse();
   const pageLoading = eventLoading || loading;
   const displayName = teamDisplayName(teamSummary?.name || overview?.name || '');
 
@@ -680,15 +680,15 @@ export default function TeamDetailPage() {
               <div className="section-heading">
                 <div>
                   <div className="section-kicker">Matches</div>
-                  <h2>Recent Matches</h2>
+                  <h2>All Matches</h2>
                 </div>
-                {recentMatches.length > 0 ? (
-                  <span className="section-note">{recentMatches.length} shown</span>
+                {displayedMatches.length > 0 ? (
+                  <span className="section-note">{displayedMatches.length} shown</span>
                 ) : null}
               </div>
 
             <div className="match-grid">
-              {recentMatches.map((match) => (
+              {displayedMatches.map((match) => (
                 <article key={match.matchKey} className="match-card">
                   <div className="match-card-head">
                     <span className="match-chip">QM {match.matchNumber}</span>
@@ -734,7 +734,7 @@ export default function TeamDetailPage() {
                 </article>
               ))}
 
-              {recentMatches.length === 0 ? (
+              {displayedMatches.length === 0 ? (
                 <div className="empty-state compact">
                   <strong>No matches yet.</strong>
                 </div>

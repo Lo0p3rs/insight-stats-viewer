@@ -29,8 +29,10 @@ export default function LoginPage() {
       setError('Enter your 6-character access code.');
       return;
     }
+
     setIsSubmitting(true);
     setError(null);
+
     try {
       const token = await loginWithCode(code);
       setToken(token);

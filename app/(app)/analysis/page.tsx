@@ -48,6 +48,21 @@ function createLeaderItems(
   }));
 }
 
+function buildRankMap(
+  teams: TeamAnalytics[],
+  value: (team: TeamAnalytics) => number,
+  direction: 'asc' | 'desc' = 'desc',
+) {
+  return new Map(
+    [...teams]
+      .sort((left, right) => {
+        const diff = value(left) - value(right);
+        return direction === 'asc' ? diff : -diff;
+      })
+      .map((team, index) => [team.teamKey, index + 1]),
+  );
+}
+
 export default function AnalysisPage() {
   const {
     selectedEvent,
@@ -116,20 +131,12 @@ export default function AnalysisPage() {
     meta: `Rank #${team.tba.rank}`,
   }));
 
-  const rolePoints: InsightScatterDatum[] = teams.map((team) => ({
-    id: `role-${team.teamKey}`,
+  const autoAccuracyPoints: InsightScatterDatum[] = teams.map((team) => ({
+    id: `auto-accuracy-${team.teamKey}`,
     label: teamNumberFromKey(team.teamKey),
-    x: team.robot.autoCycleScore + team.robot.teleCycleScore,
-    y: team.robot.totalDefenseScore,
+    x: team.robot.autoCycleScore,
+    y: team.robot.autoCycleAccuracy,
     meta: `Rank #${team.tba.rank}`,
-  }));
-
-  const defensePoints: InsightScatterDatum[] = teams.map((team) => ({
-    id: `defense-${team.teamKey}`,
-    label: teamNumberFromKey(team.teamKey),
-    x: team.robot.totalDefenseScore,
-    y: team.robot.failureCount,
-    meta: `Recovery ${formatPercent(team.robot.failureRecovery)}`,
   }));
 
   const teleAccuracyPoints: InsightScatterDatum[] = teams.map((team) => ({
@@ -155,7 +162,7 @@ export default function AnalysisPage() {
   const defenseLeaders = createLeaderItems(
     [...teams].sort((left, right) => right.robot.totalDefenseScore - left.robot.totalDefenseScore),
     (team) => team.robot.totalDefenseScore.toFixed(1),
-    (team) => `${team.robot.failureCount.toFixed(0)} fails`,
+    (team) => `Rank #${team.tba.rank}`,
   );
 
   const reliabilityLeaders = createLeaderItems(
@@ -169,6 +176,43 @@ export default function AnalysisPage() {
     (team) => team.robot.failureCount.toFixed(0),
     (team) => formatPercent(team.robot.failureRecovery),
   );
+
+  const autoScoreRanks = buildRankMap(teams, (team) => team.robot.autoCycleScore);
+  const teleScoreRanks = buildRankMap(teams, (team) => team.robot.teleCycleScore);
+  const sleeperCandidates = teams
+    .filter((team) => team.tba.rank > 0)
+    .map((team) => {
+      const autoRank = autoScoreRanks.get(team.teamKey) ?? teams.length;
+      const teleRank = teleScoreRanks.get(team.teamKey) ?? teams.length;
+      const offenseRank = (autoRank + teleRank) / 2;
+
+      return {
+        team,
+        autoRank,
+        teleRank,
+        gap: team.tba.rank - offenseRank,
+      };
+    })
+    .sort((left, right) => {
+      if (left.gap !== right.gap) {
+        return right.gap - left.gap;
+      }
+
+      return left.team.tba.rank - right.team.tba.rank;
+    });
+
+  const sleeperTeams = (
+    sleeperCandidates.filter((item) => item.gap >= 2).length > 0
+      ? sleeperCandidates.filter((item) => item.gap >= 2)
+      : sleeperCandidates
+  )
+    .slice(0, 4)
+    .map<StrategistItem>(({ team, autoRank, teleRank, gap }) => ({
+      teamKey: team.teamKey,
+      name: teamDisplayName(team.name),
+      value: `Gap +${gap.toFixed(1)}`,
+      note: `Rank #${team.tba.rank} | Auto #${autoRank} | Tele #${teleRank}`,
+    }));
 
   const scoutNext = [...teams]
     .filter((team) => team.tba.rank > 0 && team.tba.rank <= 12)
@@ -259,31 +303,47 @@ export default function AnalysisPage() {
             <div className="surface-card">
               <div className="section-heading">
                 <div>
-                  <div className="section-kicker">Role Fit</div>
-                  <h2>Offense vs Defense</h2>
+                  <div className="section-kicker">Efficiency</div>
+                  <h2>Auto vs Accuracy</h2>
                 </div>
               </div>
               <InsightScatterChart
-                data={rolePoints}
-                xLabel="Offense"
-                yLabel="Defense"
+                data={autoAccuracyPoints}
+                xLabel="Auto"
+                yLabel="Accuracy"
+                formatY={(value) => formatPercent(value)}
               />
             </div>
 
             <div className="surface-card">
               <div className="section-heading">
                 <div>
-                  <div className="section-kicker">Defense</div>
-                  <h2>Defense vs Failures</h2>
+                  <div className="section-kicker">Targets</div>
+                  <h2>Sleepers</h2>
                 </div>
               </div>
-              <InsightScatterChart
-                data={defensePoints}
-                xLabel="Defense"
-                yLabel="Failures"
-                formatY={(value) => value.toFixed(0)}
-                invertY
-              />
+              <div className="insight-list">
+                {sleeperTeams.map((item) => (
+                  <Link
+                    key={item.teamKey}
+                    href={`/teams/${item.teamKey}`}
+                    className="insight-list-item"
+                  >
+                    <div className="insight-list-heading">
+                      <strong>{teamNumberFromKey(item.teamKey)}</strong>
+                      <span>{item.name}</span>
+                    </div>
+                    <span>{item.note}</span>
+                    <em>{item.value}</em>
+                  </Link>
+                ))}
+
+                {sleeperTeams.length === 0 ? (
+                  <div className="empty-state compact">
+                    <strong>No sleepers yet.</strong>
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div className="surface-card">
