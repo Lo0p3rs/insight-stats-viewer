@@ -819,9 +819,191 @@ p {
   gap: 20px;
 }
 
-.overview-page {
+.page-wide {
   width: 100%;
   max-width: none;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.analysis-board-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.analysis-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.insight-list {
+  display: grid;
+  gap: 10px;
+}
+
+.insight-list-item,
+.analysis-watch-item {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--outline);
+  background: rgba(18, 18, 18, 0.62);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.insight-list-item:hover,
+.analysis-watch-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 94, 0, 0.22);
+  background: rgba(255, 94, 0, 0.05);
+}
+
+.insight-list-item strong,
+.analysis-watch-item strong {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.insight-list-heading {
+  display: grid;
+  gap: 2px;
+}
+
+.insight-list-heading span {
+  color: rgba(230, 230, 230, 0.82);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.insight-list-item span,
+.analysis-watch-item span,
+.scatter-summary small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.insight-list-item em {
+  color: #fff;
+  font-size: 20px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.analysis-watchlist {
+  display: grid;
+  gap: 12px;
+}
+
+.analysis-watch-item {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: center;
+  gap: 12px;
+}
+
+.analysis-watch-item > div {
+  display: grid;
+  gap: 4px;
+}
+
+.scatter-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.scatter-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scatter-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--outline);
+  background: rgba(18, 18, 18, 0.6);
+}
+
+.scatter-summary strong {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.scatter-chart {
+  width: 100%;
+  min-height: 320px;
+  overflow: visible;
+}
+
+.scatter-grid-line {
+  stroke: rgba(178, 178, 178, 0.12);
+  stroke-width: 1;
+}
+
+.scatter-axis-label,
+.scatter-axis-title {
+  fill: rgba(178, 178, 178, 0.84);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.scatter-axis-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.scatter-point {
+  fill: var(--secondary);
+  stroke: rgba(18, 18, 18, 0.96);
+  stroke-width: 3;
+  cursor: pointer;
+  transition:
+    transform 0.16s ease,
+    filter 0.16s ease,
+    fill 0.16s ease;
+}
+
+.scatter-point.active {
+  fill: var(--primary);
+  filter: drop-shadow(0 0 10px rgba(255, 94, 0, 0.3));
+}
+
+.scatter-callout-line {
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+}
+
+.scatter-callout-card {
+  fill: rgba(10, 10, 10, 0.92);
+  stroke: rgba(255, 94, 0, 0.22);
+  stroke-width: 1;
+}
+
+.scatter-callout-label {
+  fill: rgba(178, 178, 178, 0.92);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.scatter-callout-value {
+  fill: #fff;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .hero-panel {
@@ -1308,6 +1490,13 @@ tbody tr:hover .sticky-cell {
   line-height: 1;
 }
 
+.team-name-line {
+  color: rgba(230, 230, 230, 0.88);
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .team-identity-copy p {
   color: rgba(230, 230, 230, 0.82);
 }
@@ -1638,6 +1827,11 @@ tbody tr:hover .sticky-cell {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .analysis-grid,
+  .analysis-board-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .overview-hero-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1722,6 +1916,10 @@ tbody tr:hover .sticky-cell {
   .hero-summary,
   .overview-hero-stats,
   .spotlight-grid,
+  .analysis-grid,
+  .analysis-board-grid,
+  .analysis-metric-grid,
+  .scatter-summary,
   .chart-summary,
   .trend-summary-grid,
   .profile-grid,
@@ -1741,6 +1939,10 @@ tbody tr:hover .sticky-cell {
 
   .profile-carousel-arrow {
     width: 100%;
+  }
+
+  .analysis-watch-item {
+    grid-template-columns: 1fr;
   }
 
   .workspace-topbar {

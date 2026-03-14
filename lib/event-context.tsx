@@ -45,8 +45,9 @@ function readCachedEvents(): Event[] {
           name: typeof item.name === 'string' ? item.name : '',
           eventKey: typeof item.eventKey === 'string' ? item.eventKey : '',
           startDate: typeof item.startDate === 'string' ? item.startDate : '',
+          configured: item.configured === true,
         }))
-        .filter((event) => event.eventKey),
+        .filter((event) => event.configured && event.eventKey),
     );
   } catch {
     return [];

@@ -7,7 +7,6 @@ import EventPicker from '@/components/EventPicker';
 import RetryError from '@/components/RetryError';
 import { clearToken, getToken } from '@/lib/auth';
 import { EventProvider, useEventContext } from '@/lib/event-context';
-import { formatEventDate } from '@/lib/format';
 
 function ShellFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -71,7 +70,12 @@ function ShellFrame({ children }: { children: ReactNode }) {
   };
 
   const onTeamPage = pathname?.startsWith('/teams/') ?? false;
-  const pageTitle = onTeamPage ? 'Team' : 'Overview';
+  const onAnalysisPage = pathname === '/analysis';
+  const pageTitle = onTeamPage
+    ? 'Team'
+    : onAnalysisPage
+      ? 'Analysis'
+      : 'Overview';
   const menuButtonLabel = isMobileViewport
     ? navOpen
       ? 'Close'
@@ -142,17 +146,15 @@ function ShellFrame({ children }: { children: ReactNode }) {
                 <strong>Overview</strong>
               </span>
             </Link>
+            <Link
+              href="/analysis"
+              className={`nav-link ${onAnalysisPage ? 'active' : ''}`}
+            >
+              <span className="nav-link-copy">
+                <strong>Analysis</strong>
+              </span>
+            </Link>
           </nav>
-        </section>
-
-        <section className="nav-selected-event">
-          <span className="nav-selected-kicker">Event</span>
-          <strong>{selectedEvent?.name ?? 'No event selected'}</strong>
-          <span>
-            {selectedEvent
-              ? `${selectedEvent.eventKey} • ${formatEventDate(selectedEvent.startDate)}`
-              : 'Select an event'}
-          </span>
         </section>
 
         <div className="nav-footer">
@@ -205,9 +207,7 @@ function ShellFrame({ children }: { children: ReactNode }) {
               <span>Event</span>
               <strong>{selectedEvent?.name ?? 'No event selected'}</strong>
               <small>
-                {selectedEvent
-                  ? `${selectedEvent.eventKey} • ${formatEventDate(selectedEvent.startDate)}`
-                  : 'Select an event'}
+                {selectedEvent ? selectedEvent.eventKey : 'Select an event'}
               </small>
             </div>
           </div>

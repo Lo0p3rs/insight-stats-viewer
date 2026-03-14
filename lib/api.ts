@@ -227,17 +227,21 @@ export async function loginWithCode(code: string): Promise<string> {
 
 export async function fetchEvents(token: string): Promise<Event[]> {
   const data = await apiFetch<unknown[]>('/events', token);
-  return data.map((item) => ({
-    name: toString((item as Record<string, unknown>).name),
-    eventKey: toString(
-      (item as Record<string, unknown>).event_key ??
-        (item as Record<string, unknown>).eventKey,
-    ),
-    startDate: toString(
-      (item as Record<string, unknown>).start_date ??
-        (item as Record<string, unknown>).startDate,
-    ),
-  }));
+  return data
+    .map((item) => ({
+      name: toString((item as Record<string, unknown>).name),
+      eventKey: toString(
+        (item as Record<string, unknown>).event_key ??
+          (item as Record<string, unknown>).eventKey,
+      ),
+      startDate: toString(
+        (item as Record<string, unknown>).start_date ??
+          (item as Record<string, unknown>).startDate,
+      ),
+      configured:
+        (item as Record<string, unknown>).configured === true,
+    }))
+    .filter((event) => event.configured && event.eventKey);
 }
 
 function parseAlliance(raw: unknown) {

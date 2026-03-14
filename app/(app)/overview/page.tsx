@@ -6,9 +6,15 @@ import RetryError from '@/components/RetryError';
 import { fetchEventMatches, fetchTeamAnalytics } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { useEventContext } from '@/lib/event-context';
+import {
+  buildMatchCounts,
+  getPlayedValue,
+  getScoutedValue,
+  type MatchCounts,
+} from '@/lib/event-stats';
 import { formatPercent } from '@/lib/format';
 import { teamAvatarUrl, teamNumberFromKey } from '@/lib/team-utils';
-import type { EventMatch, TeamAnalytics } from '@/lib/types';
+import type { TeamAnalytics } from '@/lib/types';
 
 type SortKey =
   | 'team'
@@ -37,11 +43,6 @@ type SortKey =
   | 'failures'
   | 'failureRecovery';
 
-type MatchCounts = {
-  played: number;
-  scouted: number;
-};
-
 type Column = {
   key: SortKey;
   label: string;
@@ -64,35 +65,6 @@ const essentialColumnKeys: SortKey[] = [
   'failures',
   'failureRecovery',
 ];
-
-function getTeamAppearances(team: TeamAnalytics) {
-  return team.tba.wins + team.tba.losses + team.tba.ties;
-}
-
-function buildMatchCounts(matches: EventMatch[]) {
-  const counts: Record<string, MatchCounts> = {};
-
-  matches
-    .filter((match) => match.level === 'qm')
-    .forEach((match) => {
-      const teamKeys = [
-        ...match.alliances.red.teamKeys,
-        ...match.alliances.blue.teamKeys,
-      ];
-      const scoutedTeams = new Set(match.scoutingStatus.robot);
-
-      teamKeys.forEach((teamKey) => {
-        const entry = counts[teamKey] ?? { played: 0, scouted: 0 };
-        entry.played += 1;
-        if (scoutedTeams.has(teamKey)) {
-          entry.scouted += 1;
-        }
-        counts[teamKey] = entry;
-      });
-    });
-
-  return counts;
-}
 
 export default function OverviewPage() {
   const {
@@ -189,12 +161,6 @@ export default function OverviewPage() {
     };
   }, [eventLoading, selectedEventKey, eventVersion, reloadNonce]);
 
-  const getPlayedValue = (team: TeamAnalytics) =>
-    countsMap[team.teamKey]?.played ?? getTeamAppearances(team);
-
-  const getScoutedValue = (team: TeamAnalytics) =>
-    countsMap[team.teamKey]?.scouted ?? team.scoutedMatches ?? 0;
-
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
       setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -229,14 +195,15 @@ export default function OverviewPage() {
     {
       key: 'played',
       label: 'Played',
-      render: (team) => getPlayedValue(team),
-      sortValue: (team) => getPlayedValue(team),
+      render: (team) => getPlayedValue(team, countsMap),
+      sortValue: (team) => getPlayedValue(team, countsMap),
     },
     {
       key: 'scouted',
       label: 'Scouted',
-      render: (team) => `${getScoutedValue(team)}/${getPlayedValue(team)}`,
-      sortValue: (team) => getScoutedValue(team),
+      render: (team) =>
+        `${getScoutedValue(team, countsMap)}/${getPlayedValue(team, countsMap)}`,
+      sortValue: (team) => getScoutedValue(team, countsMap),
     },
     {
       key: 'rank',
@@ -403,11 +370,11 @@ export default function OverviewPage() {
   });
 
   const totalGamesPlayed = teams.reduce(
-    (sum, team) => sum + getPlayedValue(team),
+    (sum, team) => sum + getPlayedValue(team, countsMap),
     0,
   );
   const totalGamesScouted = teams.reduce(
-    (sum, team) => sum + getScoutedValue(team),
+    (sum, team) => sum + getScoutedValue(team, countsMap),
     0,
   );
   const scoutingCoverage =
@@ -423,7 +390,7 @@ export default function OverviewPage() {
       : '';
 
   return (
-    <div className="page overview-page">
+    <div className="page page-wide">
       <section className="surface-card overview-hero animate-in">
         <div className="overview-hero-copy">
           <span className="hero-kicker">Overview</span>

@@ -2,6 +2,7 @@ export type Event = {
   name: string;
   eventKey: string;
   startDate: string;
+  configured: boolean;
 };
 
 export type EventAlliance = {

@@ -1,7 +1,6 @@
 'use client';
 
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
-import { formatEventDate } from '@/lib/format';
 import type { Event } from '@/lib/types';
 
 type EventPickerProps = {
@@ -78,9 +77,7 @@ export default function EventPicker({
           {selectedEvent?.name ?? (loading ? 'Loading events...' : 'Select event')}
         </strong>
         <span className="event-picker-meta">
-          {selectedEvent
-            ? `${selectedEvent.eventKey} • ${formatEventDate(selectedEvent.startDate)}`
-            : 'Choose from the event list'}
+          {selectedEvent ? selectedEvent.eventKey : 'Choose from the list'}
         </span>
       </button>
 
@@ -111,9 +108,7 @@ export default function EventPicker({
                   }}
                 >
                   <span className="event-option-name">{event.name}</span>
-                  <span className="event-picker-meta">
-                    {event.eventKey} • {formatEventDate(event.startDate)}
-                  </span>
+                  <span className="event-picker-meta">{event.eventKey}</span>
                 </button>
               ))
             )}

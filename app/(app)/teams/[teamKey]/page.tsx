@@ -9,7 +9,7 @@ import { fetchTeamAnalytics, fetchTeamDetail } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { useEventContext } from '@/lib/event-context';
 import { formatPercent } from '@/lib/format';
-import { teamAvatarUrl, teamNumberFromKey } from '@/lib/team-utils';
+import { teamAvatarUrl, teamDisplayName, teamNumberFromKey } from '@/lib/team-utils';
 import type { TeamAnalytics, TeamDetail, TeamMatchAnalytics } from '@/lib/types';
 
 type Metric = {
@@ -145,10 +145,6 @@ const rankDefinitions: RankDefinition[] = [
     extractor: (team) => team.robot.failureRecovery,
   },
   {
-    key: 'humanAccuracy',
-    extractor: (team) => team.humanPlayer.accuracy,
-  },
-  {
     key: 'fuelCountAvg',
     extractor: (team) => team.humanPlayer.fuelCountAvg,
   },
@@ -200,6 +196,7 @@ export default function TeamDetailPage() {
   const [metricId, setMetricId] = useState(metrics[0].id);
   const [teamRanks, setTeamRanks] = useState<Record<string, number>>({});
   const [teamCount, setTeamCount] = useState(0);
+  const [teamSummary, setTeamSummary] = useState<TeamAnalytics | null>(null);
   const [sectionIndex, setSectionIndex] = useState(0);
 
   useEffect(() => {
@@ -249,6 +246,7 @@ export default function TeamDetailPage() {
     if (!teamKey || !selectedEventKey || !token) {
       setTeamRanks({});
       setTeamCount(0);
+      setTeamSummary(null);
       return;
     }
 
@@ -259,12 +257,14 @@ export default function TeamDetailPage() {
         if (!cancelled) {
           setTeamCount(data.length);
           setTeamRanks(computeRanks(data, teamKey));
+          setTeamSummary(data.find((team) => team.teamKey === teamKey) ?? null);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setTeamCount(0);
           setTeamRanks({});
+          setTeamSummary(null);
         }
       });
 
@@ -327,6 +327,7 @@ export default function TeamDetailPage() {
   })();
   const recentMatches = [...matches].slice(-6).reverse();
   const pageLoading = eventLoading || loading;
+  const displayName = teamDisplayName(teamSummary?.name || overview?.name || '');
 
   const statSections: StatSection[] = overview
     ? [
@@ -439,12 +440,6 @@ export default function TeamDetailPage() {
               rankKey: 'failureRecovery',
             },
             {
-              label: 'Human Accuracy',
-              value: formatPercent(overview.humanPlayer.accuracy),
-              subtitle: 'human player accuracy',
-              rankKey: 'humanAccuracy',
-            },
-            {
               label: 'Fuel Count',
               value: overview.humanPlayer.fuelCountAvg.toFixed(1),
               subtitle: 'fuel count average',
@@ -509,9 +504,10 @@ export default function TeamDetailPage() {
               />
               <div className="team-identity-copy">
                 <span className="hero-kicker">Team</span>
-                <h1>
-                  Team {teamNumberFromKey(overview.teamKey)} - {overview.name}
-                </h1>
+                <h1>Team {teamNumberFromKey(overview.teamKey)}</h1>
+                {displayName ? (
+                  <div className="team-name-line">{displayName}</div>
+                ) : null}
                 <div className="team-identity-actions">
                   <Link href="/overview" className="btn btn-ghost team-back-link">
                     Back
@@ -547,8 +543,8 @@ export default function TeamDetailPage() {
                 <strong>{overview.robot.totalDefenseScore.toFixed(1)}</strong>
               </div>
               <div className="hero-stat hero-stat-accent">
-                <span>Human accuracy</span>
-                <strong>{formatPercent(overview.humanPlayer.accuracy)}</strong>
+                <span>Recovery</span>
+                <strong>{formatPercent(overview.robot.failureRecovery)}</strong>
               </div>
             </div>
           </section>
