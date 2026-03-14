@@ -142,7 +142,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
     const intervalId = window.setInterval(() => {
       void refreshEvents({ silent: true });
-    }, 60000);
+    }, 300000);
 
     return () => {
       window.clearInterval(intervalId);
