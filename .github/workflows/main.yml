@@ -21,12 +21,12 @@ jobs:
         with:
           push: true
           tags: ghcr.io/lo0p3rs/insight-stats-viewer:latest, ghcr.io/lo0p3rs/insight-stats-viewer:${{ github.sha }}
-      # -
-      #   name: Deploy to Lightsail
-      #   uses: appleboy/ssh-action@v1
-      #   with:
-      #     host: ${{ secrets.LIGHTSAIL_HOST }}
-      #     username: ${{ secrets.LIGHTSAIL_USER }}
-      #     key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-      #     script: |
-      #       /home/ec2-user/insight/insight-stats-viewer/deploy.sh
+      -
+        name: Deploy to Lightsail
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            /home/ec2-user/insight/insight-stats-viewer/deploy.sh
