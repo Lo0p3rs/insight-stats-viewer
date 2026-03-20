@@ -1,6 +1,8 @@
 import type {
   Event,
   EventMatch,
+  TbaEventMatch,
+  TbaTeamSimple,
   TeamAnalytics,
   TeamDetail,
   TeamMatchAnalytics,
@@ -19,6 +21,7 @@ import {
 } from '@/lib/errors';
 
 const API_BASE = '/api/insight';
+const TBA_API_BASE = '/api/tba';
 const REQUEST_TIMEOUT_MS = 20000;
 
 const DEFAULT_HEADERS = {
@@ -31,6 +34,11 @@ const USERNAME = 'insight_user';
 function buildUrl(path: string) {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${API_BASE}${cleanPath}`;
+}
+
+function buildTbaUrl(path: string) {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${TBA_API_BASE}${cleanPath}`;
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -190,6 +198,32 @@ async function apiFetch<T>(
   }
 }
 
+async function proxyFetch<T>(input: string, options?: RequestInit): Promise<T> {
+  try {
+    const response = await fetchWithTimeout(input, {
+      ...options,
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      const message = await parseErrorResponse(response);
+      throw toAppException(
+        response.status,
+        message,
+        response.headers.get('x-insight-error'),
+      );
+    }
+
+    if (response.status === 204) {
+      return {} as T;
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    throw normalizeThrownError(error);
+  }
+}
+
 export async function loginWithCode(code: string): Promise<string> {
   try {
     const response = await fetchWithTimeout(buildUrl('auth/token'), {
@@ -292,6 +326,57 @@ function parseEventMatch(raw: Record<string, unknown>): EventMatch {
   };
 }
 
+function parseTbaEventMatchBreakdown(raw: unknown) {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const data = raw as Record<string, unknown>;
+  const hubScore = data.hubScore as Record<string, unknown> | undefined;
+
+  return {
+    hubScore: hubScore
+      ? {
+          autoPoints: toNumber(hubScore.autoPoints),
+          teleopPoints: toNumber(hubScore.teleopPoints),
+          totalPoints: toNumber(hubScore.totalPoints),
+        }
+      : null,
+  };
+}
+
+function parseTbaEventMatch(raw: Record<string, unknown>): TbaEventMatch {
+  const alliances = (raw.alliances as Record<string, unknown>) ?? {};
+  const scoreBreakdown = (raw.score_breakdown as Record<string, unknown>) ?? null;
+
+  return {
+    key: toString(raw.key),
+    eventKey: toString(raw.event_key),
+    compLevel: toString(raw.comp_level),
+    matchNumber: toNumber(raw.match_number),
+    setNumber: toNumber(raw.set_number),
+    alliances: {
+      red: parseAlliance(alliances.red),
+      blue: parseAlliance(alliances.blue),
+    },
+    scoreBreakdown: scoreBreakdown
+      ? {
+          red: parseTbaEventMatchBreakdown(scoreBreakdown.red),
+          blue: parseTbaEventMatchBreakdown(scoreBreakdown.blue),
+        }
+      : null,
+  };
+}
+
+function parseTbaTeamSimple(raw: Record<string, unknown>): TbaTeamSimple {
+  return {
+    key: toString(raw.key),
+    teamNumber: toNumber(raw.team_number),
+    nickname: toString(raw.nickname),
+    name: toString(raw.name),
+  };
+}
+
 export async function fetchEventMatches(
   token: string,
   eventKey: string,
@@ -301,6 +386,20 @@ export async function fetchEventMatches(
     token,
   );
   return data.map((item) => parseEventMatch(item as Record<string, unknown>));
+}
+
+export async function fetchTbaEventMatches(eventKey: string): Promise<TbaEventMatch[]> {
+  const data = await proxyFetch<unknown[]>(
+    buildTbaUrl(`/event/${encodeURIComponent(eventKey)}/matches`),
+  );
+  return data.map((item) => parseTbaEventMatch(item as Record<string, unknown>));
+}
+
+export async function fetchTbaEventTeams(eventKey: string): Promise<TbaTeamSimple[]> {
+  const data = await proxyFetch<unknown[]>(
+    buildTbaUrl(`/event/${encodeURIComponent(eventKey)}/teams`),
+  );
+  return data.map((item) => parseTbaTeamSimple(item as Record<string, unknown>));
 }
 
 function parseTeamAnalytics(raw: Record<string, unknown>): TeamAnalytics {
@@ -333,15 +432,15 @@ function parseTeamAnalytics(raw: Record<string, unknown>): TeamAnalytics {
       rank: toNumber(tbaRaw.rank),
     },
     robot: {
-      autoCycleScore: toNumber(robotRaw.auto_cycle_score),
-      autoCycleRate: toNumber(robotRaw.auto_cycle_rate),
+      autoFuelApc: toNumber(
+        robotRaw.auto_fuel_apc ?? robotRaw.autoFuelApc,
+      ),
       autoCycleCountAvg: toNumber(robotRaw.auto_cycle_count_avg),
-      autoCycleAccuracy: toNumber(robotRaw.auto_cycle_accuracy),
       autoTowerReliability: toNumber(robotRaw.auto_tower_reliability),
-      teleCycleScore: toNumber(robotRaw.tele_cycle_score),
-      teleCycleRate: toNumber(robotRaw.tele_cycle_rate),
+      teleFuelApc: toNumber(
+        robotRaw.tele_fuel_apc ?? robotRaw.teleFuelApc,
+      ),
       teleCycleCountAvg: toNumber(robotRaw.tele_cycle_count_avg),
-      teleCycleAccuracy: toNumber(robotRaw.tele_cycle_accuracy),
       teleTowerLevel: toString(robotRaw.tele_tower_level, 'none'),
       teleTowerReliability: toNumber(robotRaw.tele_tower_reliability),
       intakeDefenseCount: toNumber(robotRaw.intake_defense_count),

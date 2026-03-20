@@ -119,10 +119,10 @@ export function sortTeams(teams: TeamAnalytics[], sortMode: TeamSortMode) {
       list.sort((a, b) => b.tba.opr - a.tba.opr);
       break;
     case 'tele':
-      list.sort((a, b) => b.robot.teleCycleScore - a.robot.teleCycleScore);
+      list.sort((a, b) => b.robot.teleFuelApc - a.robot.teleFuelApc);
       break;
     case 'auto':
-      list.sort((a, b) => b.robot.autoCycleScore - a.robot.autoCycleScore);
+      list.sort((a, b) => b.robot.autoFuelApc - a.robot.autoFuelApc);
       break;
     case 'defense':
       list.sort((a, b) => b.robot.totalDefenseScore - a.robot.totalDefenseScore);
@@ -139,8 +139,8 @@ export function getMaxMetric(teams: TeamAnalytics[], extractor: (team: TeamAnaly
 }
 
 export function calculateTeamCardMetrics(teams: TeamAnalytics[], team: TeamAnalytics) {
-  const maxAuto = getMaxMetric(teams, (entry) => entry.robot.autoCycleScore);
-  const maxTele = getMaxMetric(teams, (entry) => entry.robot.teleCycleScore);
+  const maxAuto = getMaxMetric(teams, (entry) => entry.robot.autoFuelApc);
+  const maxTele = getMaxMetric(teams, (entry) => entry.robot.teleFuelApc);
   const maxDefense = getMaxMetric(teams, (entry) => entry.robot.totalDefenseScore);
   const maxFailure = getMaxMetric(teams, (entry) => entry.robot.failureCount);
 
@@ -148,8 +148,8 @@ export function calculateTeamCardMetrics(teams: TeamAnalytics[], team: TeamAnaly
     maxValue > 0 ? Math.min(1, value / maxValue) : 0;
 
   return {
-    auto: safePercent(team.robot.autoCycleScore, maxAuto),
-    tele: safePercent(team.robot.teleCycleScore, maxTele),
+    auto: safePercent(team.robot.autoFuelApc, maxAuto),
+    tele: safePercent(team.robot.teleFuelApc, maxTele),
     defense: safePercent(team.robot.totalDefenseScore, maxDefense),
     reliable:
       maxFailure > 0 ? Math.max(0, 1 - team.robot.failureCount / maxFailure) : 1,
@@ -231,15 +231,15 @@ export function buildTeamStatMetrics(teams: TeamAnalytics[], team: TeamAnalytics
     buildRankedMetric(
       teams,
       team,
-      'Auto Cycle Score',
-      (entry) => entry.robot.autoCycleScore,
+      'Auto APC',
+      (entry) => entry.robot.autoFuelApc,
       (value) => value.toFixed(1),
     ),
     buildRankedMetric(
       teams,
       team,
-      'Tele Cycle Score',
-      (entry) => entry.robot.teleCycleScore,
+      'Tele APC',
+      (entry) => entry.robot.teleFuelApc,
       (value) => value.toFixed(1),
     ),
     buildRankedMetric(
@@ -252,16 +252,16 @@ export function buildTeamStatMetrics(teams: TeamAnalytics[], team: TeamAnalytics
     buildRankedMetric(
       teams,
       team,
-      'Auto Accuracy',
-      (entry) => entry.robot.autoCycleAccuracy,
-      (value) => `${(value * 100).toFixed(0)}%`,
+      'Auto Cycles',
+      (entry) => entry.robot.autoCycleCountAvg,
+      (value) => value.toFixed(1),
     ),
     buildRankedMetric(
       teams,
       team,
-      'Tele Accuracy',
-      (entry) => entry.robot.teleCycleAccuracy,
-      (value) => `${(value * 100).toFixed(0)}%`,
+      'Tele Cycles',
+      (entry) => entry.robot.teleCycleCountAvg,
+      (value) => value.toFixed(1),
     ),
     buildRankedMetric(
       teams,

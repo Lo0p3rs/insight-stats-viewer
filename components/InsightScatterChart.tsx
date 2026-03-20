@@ -14,6 +14,7 @@ type InsightScatterChartProps = {
   data: InsightScatterDatum[];
   xLabel: string;
   yLabel: string;
+  summaryLabel?: string;
   formatX?: (value: number) => string;
   formatY?: (value: number) => string;
   invertX?: boolean;
@@ -40,6 +41,7 @@ export default function InsightScatterChart({
   data,
   xLabel,
   yLabel,
+  summaryLabel = 'Team',
   formatX = (value) => value.toFixed(1),
   formatY = (value) => value.toFixed(1),
   invertX = false,
@@ -111,7 +113,7 @@ export default function InsightScatterChart({
     <div className="scatter-shell">
       <div className="scatter-summary">
         <div>
-          <span className="chart-summary-label">Team</span>
+          <span className="chart-summary-label">{summaryLabel}</span>
           <strong>{activePoint.label}</strong>
           {activePoint.meta ? <small>{activePoint.meta}</small> : null}
         </div>

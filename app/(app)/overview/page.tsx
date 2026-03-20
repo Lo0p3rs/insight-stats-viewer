@@ -22,15 +22,11 @@ type SortKey =
   | 'played'
   | 'scouted'
   | 'rank'
-  | 'autoScore'
-  | 'autoRate'
+  | 'autoApc'
   | 'autoCount'
-  | 'autoAccuracy'
   | 'autoTowerReliability'
-  | 'teleScore'
-  | 'teleRate'
+  | 'teleApc'
   | 'teleCount'
-  | 'teleAccuracy'
   | 'teleTowerLevel'
   | 'teleTowerReliability'
   | 'intakeDefenseCount'
@@ -57,10 +53,10 @@ const essentialColumnKeys: SortKey[] = [
   'record',
   'played',
   'scouted',
-  'autoScore',
-  'autoAccuracy',
-  'teleScore',
-  'teleAccuracy',
+  'autoApc',
+  'autoCount',
+  'teleApc',
+  'teleCount',
   'defense',
   'failures',
   'failureRecovery',
@@ -220,28 +216,16 @@ export default function OverviewPage() {
       sortValue: (team) => getScoutedValue(team, countsMap),
     },
     {
-      key: 'autoScore',
-      label: 'Auto Score',
-      render: (team) => team.robot.autoCycleScore.toFixed(1),
-      sortValue: (team) => team.robot.autoCycleScore,
-    },
-    {
-      key: 'autoRate',
-      label: 'Auto Rate',
-      render: (team) => team.robot.autoCycleRate.toFixed(1),
-      sortValue: (team) => team.robot.autoCycleRate,
+      key: 'autoApc',
+      label: 'Auto APC',
+      render: (team) => team.robot.autoFuelApc.toFixed(1),
+      sortValue: (team) => team.robot.autoFuelApc,
     },
     {
       key: 'autoCount',
-      label: 'Auto Count',
+      label: 'Auto Cycles',
       render: (team) => team.robot.autoCycleCountAvg.toFixed(1),
       sortValue: (team) => team.robot.autoCycleCountAvg,
-    },
-    {
-      key: 'autoAccuracy',
-      label: 'Auto Accuracy',
-      render: (team) => formatPercent(team.robot.autoCycleAccuracy),
-      sortValue: (team) => team.robot.autoCycleAccuracy,
     },
     {
       key: 'autoTowerReliability',
@@ -250,28 +234,16 @@ export default function OverviewPage() {
       sortValue: (team) => team.robot.autoTowerReliability,
     },
     {
-      key: 'teleScore',
-      label: 'Tele Score',
-      render: (team) => team.robot.teleCycleScore.toFixed(1),
-      sortValue: (team) => team.robot.teleCycleScore,
-    },
-    {
-      key: 'teleRate',
-      label: 'Tele Rate',
-      render: (team) => team.robot.teleCycleRate.toFixed(1),
-      sortValue: (team) => team.robot.teleCycleRate,
+      key: 'teleApc',
+      label: 'Tele APC',
+      render: (team) => team.robot.teleFuelApc.toFixed(1),
+      sortValue: (team) => team.robot.teleFuelApc,
     },
     {
       key: 'teleCount',
-      label: 'Tele Count',
+      label: 'Tele Cycles',
       render: (team) => team.robot.teleCycleCountAvg.toFixed(1),
       sortValue: (team) => team.robot.teleCycleCountAvg,
-    },
-    {
-      key: 'teleAccuracy',
-      label: 'Tele Accuracy',
-      render: (team) => formatPercent(team.robot.teleCycleAccuracy),
-      sortValue: (team) => team.robot.teleCycleAccuracy,
     },
     {
       key: 'teleTowerLevel',

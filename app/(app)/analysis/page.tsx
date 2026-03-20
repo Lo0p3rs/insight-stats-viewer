@@ -6,7 +6,11 @@ import InsightScatterChart, {
   type InsightScatterDatum,
 } from '@/components/InsightScatterChart';
 import RetryError from '@/components/RetryError';
-import { fetchEventMatches, fetchTeamAnalytics } from '@/lib/api';
+import {
+  fetchEventMatches,
+  fetchTbaEventTeams,
+  fetchTeamAnalytics,
+} from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { useEventContext } from '@/lib/event-context';
 import {
@@ -18,7 +22,7 @@ import {
 } from '@/lib/event-stats';
 import { formatPercent } from '@/lib/format';
 import { teamDisplayName, teamNumberFromKey } from '@/lib/team-utils';
-import type { TeamAnalytics } from '@/lib/types';
+import type { TbaTeamSimple, TeamAnalytics } from '@/lib/types';
 
 type StrategistItem = {
   teamKey: string;
@@ -39,10 +43,11 @@ function createLeaderItems(
   teams: TeamAnalytics[],
   value: (team: TeamAnalytics) => string,
   note: (team: TeamAnalytics) => string,
+  name: (team: TeamAnalytics) => string,
 ) {
   return teams.slice(0, 5).map((team) => ({
     teamKey: team.teamKey,
-    name: teamDisplayName(team.name),
+    name: name(team),
     value: value(team),
     note: note(team),
   }));
@@ -71,6 +76,7 @@ export default function AnalysisPage() {
     loading: eventLoading,
   } = useEventContext();
   const [teams, setTeams] = useState<TeamAnalytics[]>([]);
+  const [tbaTeams, setTbaTeams] = useState<TbaTeamSimple[]>([]);
   const [countsMap, setCountsMap] = useState<Record<string, MatchCounts>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown | null>(null);
@@ -84,6 +90,7 @@ export default function AnalysisPage() {
     const token = getToken();
     if (!selectedEventKey || !token) {
       setTeams([]);
+      setTbaTeams([]);
       setCountsMap({});
       setLoading(false);
       return;
@@ -96,10 +103,12 @@ export default function AnalysisPage() {
     Promise.all([
       fetchTeamAnalytics(token, selectedEventKey),
       fetchEventMatches(token, selectedEventKey),
+      fetchTbaEventTeams(selectedEventKey),
     ])
-      .then(([teamData, matchData]) => {
+      .then(([teamData, matchData, tbaTeamData]) => {
         if (!cancelled) {
           setTeams(teamData);
+          setTbaTeams(tbaTeamData);
           setCountsMap(buildMatchCounts(matchData));
         }
       })
@@ -107,6 +116,7 @@ export default function AnalysisPage() {
         if (!cancelled) {
           setError(err);
           setTeams([]);
+          setTbaTeams([]);
           setCountsMap({});
         }
       })
@@ -122,47 +132,60 @@ export default function AnalysisPage() {
   }, [eventLoading, eventVersion, reloadNonce, selectedEventKey]);
 
   const pageLoading = eventLoading || loading;
+  const tbaNameByKey = Object.fromEntries(
+    tbaTeams.map((team) => [
+      team.key,
+      teamDisplayName(team.nickname) || teamDisplayName(team.name),
+    ]),
+  );
+  const getDisplayName = (team: TeamAnalytics) =>
+    teamDisplayName(team.name) ||
+    tbaNameByKey[team.teamKey] ||
+    teamNumberFromKey(team.teamKey);
 
   const offensePoints: InsightScatterDatum[] = teams.map((team) => ({
     id: `offense-${team.teamKey}`,
     label: teamNumberFromKey(team.teamKey),
-    x: team.robot.autoCycleScore,
-    y: team.robot.teleCycleScore,
+    x: team.robot.autoFuelApc,
+    y: team.robot.teleFuelApc,
     meta: `Rank #${team.tba.rank}`,
   }));
 
-  const autoAccuracyPoints: InsightScatterDatum[] = teams.map((team) => ({
-    id: `auto-accuracy-${team.teamKey}`,
+  const autoCyclePoints: InsightScatterDatum[] = teams.map((team) => ({
+    id: `auto-cycles-${team.teamKey}`,
     label: teamNumberFromKey(team.teamKey),
-    x: team.robot.autoCycleScore,
-    y: team.robot.autoCycleAccuracy,
+    x: team.robot.autoFuelApc,
+    y: team.robot.autoCycleCountAvg,
     meta: `Rank #${team.tba.rank}`,
   }));
 
-  const teleAccuracyPoints: InsightScatterDatum[] = teams.map((team) => ({
-    id: `tele-accuracy-${team.teamKey}`,
+  const teleCyclePoints: InsightScatterDatum[] = teams.map((team) => ({
+    id: `tele-cycles-${team.teamKey}`,
     label: teamNumberFromKey(team.teamKey),
-    x: team.robot.teleCycleScore,
-    y: team.robot.teleCycleAccuracy,
+    x: team.robot.teleFuelApc,
+    y: team.robot.teleCycleCountAvg,
     meta: `Rank #${team.tba.rank}`,
   }));
 
   const autoLeaders = createLeaderItems(
-    [...teams].sort((left, right) => right.robot.autoCycleScore - left.robot.autoCycleScore),
-    (team) => team.robot.autoCycleScore.toFixed(1),
+    [...teams].sort((left, right) => right.robot.autoFuelApc - left.robot.autoFuelApc),
+    (team) => team.robot.autoFuelApc.toFixed(1),
     (team) => `Rank #${team.tba.rank}`,
+    getDisplayName,
   );
 
   const teleLeaders = createLeaderItems(
-    [...teams].sort((left, right) => right.robot.teleCycleScore - left.robot.teleCycleScore),
-    (team) => team.robot.teleCycleScore.toFixed(1),
+    [...teams].sort((left, right) => right.robot.teleFuelApc - left.robot.teleFuelApc),
+    (team) => team.robot.teleFuelApc.toFixed(1),
     (team) => `Rank #${team.tba.rank}`,
+    getDisplayName,
   );
 
   const defenseLeaders = createLeaderItems(
     [...teams].sort((left, right) => right.robot.totalDefenseScore - left.robot.totalDefenseScore),
     (team) => team.robot.totalDefenseScore.toFixed(1),
     (team) => `Rank #${team.tba.rank}`,
+    getDisplayName,
   );
 
   const reliabilityLeaders = createLeaderItems(
@@ -175,15 +198,16 @@ export default function AnalysisPage() {
     }),
     (team) => team.robot.failureCount.toFixed(0),
     (team) => formatPercent(team.robot.failureRecovery),
+    getDisplayName,
   );
 
-  const autoScoreRanks = buildRankMap(teams, (team) => team.robot.autoCycleScore);
-  const teleScoreRanks = buildRankMap(teams, (team) => team.robot.teleCycleScore);
+  const autoApcRanks = buildRankMap(teams, (team) => team.robot.autoFuelApc);
+  const teleApcRanks = buildRankMap(teams, (team) => team.robot.teleFuelApc);
   const sleeperCandidates = teams
     .filter((team) => team.tba.rank > 0)
     .map((team) => {
-      const autoRank = autoScoreRanks.get(team.teamKey) ?? teams.length;
-      const teleRank = teleScoreRanks.get(team.teamKey) ?? teams.length;
+      const autoRank = autoApcRanks.get(team.teamKey) ?? teams.length;
+      const teleRank = teleApcRanks.get(team.teamKey) ?? teams.length;
       const offenseRank = (autoRank + teleRank) / 2;
 
       return {
@@ -209,9 +233,9 @@ export default function AnalysisPage() {
     .slice(0, 4)
     .map<StrategistItem>(({ team, autoRank, teleRank, gap }) => ({
       teamKey: team.teamKey,
-      name: teamDisplayName(team.name),
+      name: getDisplayName(team),
       value: `Gap +${gap.toFixed(1)}`,
-      note: `Rank #${team.tba.rank} | Auto #${autoRank} | Tele #${teleRank}`,
+      note: `Rank #${team.tba.rank} | Auto APC #${autoRank} | Tele APC #${teleRank}`,
     }));
 
   const scoutNext = [...teams]
@@ -227,8 +251,8 @@ export default function AnalysisPage() {
     })
     .slice(0, 8);
 
-  const averageAuto = average(teams.map((team) => team.robot.autoCycleScore));
-  const averageTele = average(teams.map((team) => team.robot.teleCycleScore));
+  const averageAuto = average(teams.map((team) => team.robot.autoFuelApc));
+  const averageTele = average(teams.map((team) => team.robot.teleFuelApc));
   const averageDefense = average(teams.map((team) => team.robot.totalDefenseScore));
   const averageCoverage = average(
     teams.map((team) => getCoverageValue(team, countsMap)),
@@ -248,11 +272,11 @@ export default function AnalysisPage() {
             <strong>{teams.length}</strong>
           </div>
           <div className="overview-hero-stat">
-            <span>Avg Auto</span>
+            <span>Avg Auto APC</span>
             <strong>{averageAuto.toFixed(1)}</strong>
           </div>
           <div className="overview-hero-stat">
-            <span>Avg Tele</span>
+            <span>Avg Tele APC</span>
             <strong>{averageTele.toFixed(1)}</strong>
           </div>
           <div className="overview-hero-stat overview-hero-stat-accent">
@@ -290,13 +314,13 @@ export default function AnalysisPage() {
               <div className="section-heading">
                 <div>
                   <div className="section-kicker">Offense</div>
-                  <h2>Auto vs Tele</h2>
+                  <h2>Auto APC vs Tele APC</h2>
                 </div>
               </div>
               <InsightScatterChart
                 data={offensePoints}
-                xLabel="Auto"
-                yLabel="Tele"
+                xLabel="Auto APC"
+                yLabel="Tele APC"
               />
             </div>
 
@@ -304,14 +328,13 @@ export default function AnalysisPage() {
               <div className="section-heading">
                 <div>
                   <div className="section-kicker">Efficiency</div>
-                  <h2>Auto vs Accuracy</h2>
+                  <h2>Auto APC vs Cycles</h2>
                 </div>
               </div>
               <InsightScatterChart
-                data={autoAccuracyPoints}
-                xLabel="Auto"
-                yLabel="Accuracy"
-                formatY={(value) => formatPercent(value)}
+                data={autoCyclePoints}
+                xLabel="Auto APC"
+                yLabel="Auto Cycles"
               />
             </div>
 
@@ -350,14 +373,13 @@ export default function AnalysisPage() {
               <div className="section-heading">
                 <div>
                   <div className="section-kicker">Efficiency</div>
-                  <h2>Tele vs Accuracy</h2>
+                  <h2>Tele APC vs Cycles</h2>
                 </div>
               </div>
               <InsightScatterChart
-                data={teleAccuracyPoints}
-                xLabel="Tele"
-                yLabel="Accuracy"
-                formatY={(value) => formatPercent(value)}
+                data={teleCyclePoints}
+                xLabel="Tele APC"
+                yLabel="Tele Cycles"
               />
             </div>
           </section>
@@ -367,7 +389,7 @@ export default function AnalysisPage() {
               <div className="section-heading">
                 <div>
                   <div className="section-kicker">Leaders</div>
-                  <h2>Auto</h2>
+                  <h2>Auto APC</h2>
                 </div>
               </div>
               <div className="insight-list">
@@ -392,7 +414,7 @@ export default function AnalysisPage() {
               <div className="section-heading">
                 <div>
                   <div className="section-kicker">Leaders</div>
-                  <h2>Tele</h2>
+                  <h2>Tele APC</h2>
                 </div>
               </div>
               <div className="insight-list">
@@ -487,7 +509,7 @@ export default function AnalysisPage() {
                   >
                     <div>
                       <strong>{teamNumberFromKey(team.teamKey)}</strong>
-                      <span>{teamDisplayName(team.name)}</span>
+                      <span>{getDisplayName(team)}</span>
                       <span>Rank #{team.tba.rank}</span>
                     </div>
                     <div>
@@ -504,9 +526,9 @@ export default function AnalysisPage() {
                     </div>
                     <div>
                       <strong>
-                        {(team.robot.autoCycleScore + team.robot.teleCycleScore).toFixed(1)}
+                        {(team.robot.autoFuelApc + team.robot.teleFuelApc).toFixed(1)}
                       </strong>
-                      <span>Auto + Tele</span>
+                      <span>Total APC</span>
                     </div>
                     <div>
                       <strong>{team.robot.totalDefenseScore.toFixed(1)}</strong>
@@ -546,18 +568,18 @@ export default function AnalysisPage() {
                 </strong>
               </div>
               <div className="hero-stat">
-                <span>Best Auto</span>
+                <span>Best Auto APC</span>
                 <strong>
                   {teams.length > 0
-                    ? Math.max(...teams.map((team) => team.robot.autoCycleScore)).toFixed(1)
+                    ? Math.max(...teams.map((team) => team.robot.autoFuelApc)).toFixed(1)
                     : '0.0'}
                 </strong>
               </div>
               <div className="hero-stat">
-                <span>Best Tele</span>
+                <span>Best Tele APC</span>
                 <strong>
                   {teams.length > 0
-                    ? Math.max(...teams.map((team) => team.robot.teleCycleScore)).toFixed(1)
+                    ? Math.max(...teams.map((team) => team.robot.teleFuelApc)).toFixed(1)
                     : '0.0'}
                 </strong>
               </div>

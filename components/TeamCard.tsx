@@ -78,13 +78,13 @@ export default function TeamCard({ team, allTeams }: TeamCardProps) {
       <div className="team-stat-row">
         <StatChip label="OPR" value={team.tba.opr.toFixed(1)} tone="secondary" />
         <StatChip
-          label="Tele Cycle Score"
-          value={team.robot.teleCycleScore.toFixed(1)}
+          label="Tele APC"
+          value={team.robot.teleFuelApc.toFixed(1)}
           tone="success"
         />
         <StatChip
-          label="Auto Cycle Score"
-          value={team.robot.autoCycleScore.toFixed(1)}
+          label="Auto APC"
+          value={team.robot.autoFuelApc.toFixed(1)}
           tone="warning"
         />
       </div>

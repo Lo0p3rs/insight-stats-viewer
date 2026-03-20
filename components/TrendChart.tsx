@@ -6,6 +6,9 @@ type TrendChartProps = {
   values: number[];
   labels: string[];
   formatValue?: (value: number) => string;
+  detailValues?: Array<number | null>;
+  formatDetail?: (value: number) => string;
+  averageDetailValue?: number | null;
 };
 
 type Point = {
@@ -13,6 +16,7 @@ type Point = {
   y: number;
   label: string;
   value: number;
+  detailValue: number | null;
 };
 
 function buildSmoothPath(points: Point[]) {
@@ -37,6 +41,9 @@ export default function TrendChart({
   values,
   labels,
   formatValue = (value) => value.toFixed(1),
+  detailValues = [],
+  formatDetail,
+  averageDetailValue = null,
 }: TrendChartProps) {
   const gradientId = useId().replace(/:/g, '');
   const width = 820;
@@ -84,6 +91,7 @@ export default function TrendChart({
       y,
       label: labels[index] ?? `M${index + 1}`,
       value,
+      detailValue: detailValues[index] ?? null,
     };
   });
 
@@ -112,6 +120,17 @@ export default function TrendChart({
     Math.floor((points.length - 1) / 2),
     points.length - 1,
   ]);
+  const showDetail = Boolean(formatDetail);
+  const detailFormatter = formatDetail ?? ((value: number) => value.toFixed(0));
+  const activeDetail =
+    showDetail && activePoint.detailValue !== null
+      ? detailFormatter(activePoint.detailValue)
+      : null;
+  const averageDetail =
+    showDetail && averageDetailValue !== null
+      ? detailFormatter(averageDetailValue)
+      : null;
+  const calloutHeight = activeDetail ? 64 : 48;
 
   return (
     <div className="chart-shell">
@@ -121,11 +140,18 @@ export default function TrendChart({
           <strong>{activePoint.label}</strong>
         </div>
         <div>
-          <span className="chart-summary-label">Value</span>
+          <span className="chart-summary-label">{showDetail ? 'Score' : 'Value'}</span>
           <strong>{formatValue(activePoint.value)}</strong>
         </div>
+        {showDetail ? (
+          <div>
+            <span className="chart-summary-label">Cycles</span>
+            <strong>{activeDetail ?? '-'}</strong>
+            {averageDetail ? <small>Avg {averageDetail}</small> : null}
+          </div>
+        ) : null}
         <div>
-          <span className="chart-summary-label">Average</span>
+          <span className="chart-summary-label">{showDetail ? 'Avg score' : 'Average'}</span>
           <strong>{formatValue(average)}</strong>
         </div>
       </div>
@@ -221,7 +247,7 @@ export default function TrendChart({
             rx={12}
             ry={12}
             width={144}
-            height={48}
+            height={calloutHeight}
           />
           <text
             className="chart-callout-match"
@@ -237,6 +263,15 @@ export default function TrendChart({
           >
             {formatValue(activePoint.value)}
           </text>
+          {activeDetail ? (
+            <text
+              className="chart-callout-detail"
+              x={Math.min(width - 158, Math.max(padding.left + 12, activePoint.x - 60))}
+              y={padding.top + 46}
+            >
+              {activeDetail}
+            </text>
+          ) : null}
         </g>
       </svg>
     </div>

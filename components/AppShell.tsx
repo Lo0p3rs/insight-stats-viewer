@@ -71,11 +71,14 @@ function ShellFrame({ children }: { children: ReactNode }) {
 
   const onTeamPage = pathname?.startsWith('/teams/') ?? false;
   const onAnalysisPage = pathname === '/analysis';
+  const onComparePage = pathname === '/compare';
   const pageTitle = onTeamPage
     ? 'Team'
     : onAnalysisPage
       ? 'Analysis'
-      : 'Overview';
+      : onComparePage
+        ? 'Compare'
+        : 'Overview';
   const menuButtonLabel = isMobileViewport
     ? navOpen
       ? 'Close'
@@ -152,6 +155,14 @@ function ShellFrame({ children }: { children: ReactNode }) {
             >
               <span className="nav-link-copy">
                 <strong>Analysis</strong>
+              </span>
+            </Link>
+            <Link
+              href="/compare"
+              className={`nav-link ${onComparePage ? 'active' : ''}`}
+            >
+              <span className="nav-link-copy">
+                <strong>Compare</strong>
               </span>
             </Link>
           </nav>

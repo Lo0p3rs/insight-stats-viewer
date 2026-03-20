@@ -27,6 +27,39 @@ export type EventMatch = {
   };
 };
 
+export type TbaHubScore = {
+  autoPoints: number;
+  teleopPoints: number;
+  totalPoints: number;
+};
+
+export type TbaTeamSimple = {
+  key: string;
+  teamNumber: number;
+  nickname: string;
+  name: string;
+};
+
+export type TbaEventMatchBreakdown = {
+  hubScore: TbaHubScore | null;
+};
+
+export type TbaEventMatch = {
+  key: string;
+  eventKey: string;
+  compLevel: string;
+  matchNumber: number;
+  setNumber: number;
+  alliances: {
+    red: EventAlliance;
+    blue: EventAlliance;
+  };
+  scoreBreakdown: {
+    red: TbaEventMatchBreakdown | null;
+    blue: TbaEventMatchBreakdown | null;
+  } | null;
+};
+
 export type TeamAnalytics = {
   name: string;
   teamKey: string;
@@ -39,15 +72,11 @@ export type TeamAnalytics = {
     rank: number;
   };
   robot: {
-    autoCycleScore: number;
-    autoCycleRate: number;
+    autoFuelApc: number;
     autoCycleCountAvg: number;
-    autoCycleAccuracy: number;
     autoTowerReliability: number;
-    teleCycleScore: number;
-    teleCycleRate: number;
+    teleFuelApc: number;
     teleCycleCountAvg: number;
-    teleCycleAccuracy: number;
     teleTowerLevel: string;
     teleTowerReliability: number;
     intakeDefenseCount: number;

@@ -5,18 +5,33 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import RetryError from '@/components/RetryError';
 import TrendChart from '@/components/TrendChart';
-import { fetchTeamAnalytics, fetchTeamDetail } from '@/lib/api';
+import {
+  fetchTbaEventTeams,
+  fetchTeamAnalytics,
+  fetchTeamDetail,
+} from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { useEventContext } from '@/lib/event-context';
 import { formatPercent } from '@/lib/format';
-import { teamAvatarUrl, teamDisplayName, teamNumberFromKey } from '@/lib/team-utils';
-import type { TeamAnalytics, TeamDetail, TeamMatchAnalytics } from '@/lib/types';
+import {
+  resolveTeamDisplayName,
+  teamAvatarUrl,
+  teamNumberFromKey,
+} from '@/lib/team-utils';
+import type {
+  TbaTeamSimple,
+  TeamAnalytics,
+  TeamDetail,
+  TeamMatchAnalytics,
+} from '@/lib/types';
 
 type Metric = {
   id: string;
   label: string;
   extract: (match: TeamMatchAnalytics) => number | null;
   format: (value: number) => string;
+  detailValue?: (match: TeamMatchAnalytics) => number | null;
+  detailFormat?: (value: number) => string;
 };
 
 type RankDefinition = {
@@ -41,50 +56,18 @@ const metrics: Metric[] = [
   {
     id: 'autoScore',
     label: 'Auto Score',
-    extract: (match) => match.robot?.auto.cycles.cycleScoreAvg ?? null,
+    extract: (match) => (match.robot ? getPhaseMatchScore(match.robot.auto) : null),
     format: (value) => value.toFixed(1),
-  },
-  {
-    id: 'autoCount',
-    label: 'Auto Count',
-    extract: (match) => match.robot?.auto.cycles.cycleCount ?? null,
-    format: (value) => value.toFixed(0),
-  },
-  {
-    id: 'autoRate',
-    label: 'Auto Rate',
-    extract: (match) => match.robot?.auto.cycles.rateAvg ?? null,
-    format: (value) => value.toFixed(1),
-  },
-  {
-    id: 'autoAccuracy',
-    label: 'Auto Accuracy',
-    extract: (match) => match.robot?.auto.cycles.accuracyAvg ?? null,
-    format: (value) => formatPercent(value),
+    detailValue: (match) => match.robot?.auto.cycles.cycleCount ?? null,
+    detailFormat: (value) => `${value.toFixed(0)} cycles`,
   },
   {
     id: 'teleScore',
     label: 'Tele Score',
-    extract: (match) => match.robot?.tele.cycles.cycleScoreAvg ?? null,
+    extract: (match) => (match.robot ? getPhaseMatchScore(match.robot.tele) : null),
     format: (value) => value.toFixed(1),
-  },
-  {
-    id: 'teleCount',
-    label: 'Tele Count',
-    extract: (match) => match.robot?.tele.cycles.cycleCount ?? null,
-    format: (value) => value.toFixed(0),
-  },
-  {
-    id: 'teleRate',
-    label: 'Tele Rate',
-    extract: (match) => match.robot?.tele.cycles.rateAvg ?? null,
-    format: (value) => value.toFixed(1),
-  },
-  {
-    id: 'teleAccuracy',
-    label: 'Tele Accuracy',
-    extract: (match) => match.robot?.tele.cycles.accuracyAvg ?? null,
-    format: (value) => formatPercent(value),
+    detailValue: (match) => match.robot?.tele.cycles.cycleCount ?? null,
+    detailFormat: (value) => `${value.toFixed(0)} cycles`,
   },
   {
     id: 'defenseScore',
@@ -110,18 +93,14 @@ const metrics: Metric[] = [
 ];
 
 const rankDefinitions: RankDefinition[] = [
-  { key: 'autoCycleScore', extractor: (team) => team.robot.autoCycleScore },
-  { key: 'autoCycleRate', extractor: (team) => team.robot.autoCycleRate },
+  { key: 'autoFuelApc', extractor: (team) => team.robot.autoFuelApc },
   { key: 'autoCycleCountAvg', extractor: (team) => team.robot.autoCycleCountAvg },
-  { key: 'autoCycleAccuracy', extractor: (team) => team.robot.autoCycleAccuracy },
   {
     key: 'autoTowerReliability',
     extractor: (team) => team.robot.autoTowerReliability,
   },
-  { key: 'teleCycleScore', extractor: (team) => team.robot.teleCycleScore },
-  { key: 'teleCycleRate', extractor: (team) => team.robot.teleCycleRate },
+  { key: 'teleFuelApc', extractor: (team) => team.robot.teleFuelApc },
   { key: 'teleCycleCountAvg', extractor: (team) => team.robot.teleCycleCountAvg },
-  { key: 'teleCycleAccuracy', extractor: (team) => team.robot.teleCycleAccuracy },
   {
     key: 'teleTowerReliability',
     extractor: (team) => team.robot.teleTowerReliability,
@@ -179,6 +158,17 @@ function getRankTone(rank: number, total: number) {
   return 'low';
 }
 
+function getPhaseMatchScore(
+  phase: {
+    cycles: {
+      cycleScoreAvg: number;
+      cycleCount: number;
+    };
+  },
+) {
+  return phase.cycles.cycleScoreAvg * phase.cycles.cycleCount;
+}
+
 export default function TeamDetailPage() {
   const params = useParams();
   const teamKey = Array.isArray(params.teamKey)
@@ -197,6 +187,7 @@ export default function TeamDetailPage() {
   const [teamRanks, setTeamRanks] = useState<Record<string, number>>({});
   const [teamCount, setTeamCount] = useState(0);
   const [teamSummary, setTeamSummary] = useState<TeamAnalytics | null>(null);
+  const [tbaTeams, setTbaTeams] = useState<TbaTeamSimple[]>([]);
   const [sectionIndex, setSectionIndex] = useState(0);
 
   useEffect(() => {
@@ -247,17 +238,22 @@ export default function TeamDetailPage() {
       setTeamRanks({});
       setTeamCount(0);
       setTeamSummary(null);
+      setTbaTeams([]);
       return;
     }
 
     let cancelled = false;
 
-    fetchTeamAnalytics(token, selectedEventKey)
-      .then((data) => {
+    Promise.all([
+      fetchTeamAnalytics(token, selectedEventKey),
+      fetchTbaEventTeams(selectedEventKey),
+    ])
+      .then(([data, tbaTeamData]) => {
         if (!cancelled) {
           setTeamCount(data.length);
           setTeamRanks(computeRanks(data, teamKey));
           setTeamSummary(data.find((team) => team.teamKey === teamKey) ?? null);
+          setTbaTeams(tbaTeamData);
         }
       })
       .catch(() => {
@@ -265,6 +261,7 @@ export default function TeamDetailPage() {
           setTeamCount(0);
           setTeamRanks({});
           setTeamSummary(null);
+          setTbaTeams([]);
         }
       });
 
@@ -294,19 +291,33 @@ export default function TeamDetailPage() {
     .map((match) => ({
       label: `QM ${match.matchNumber}`,
       value: selectedMetric.extract(match),
+      detailValue: selectedMetric.detailValue?.(match) ?? null,
     }))
     .filter(
-      (point): point is { label: string; value: number } =>
-        point.value !== null && !Number.isNaN(point.value),
+      (
+        point,
+      ): point is {
+        label: string;
+        value: number;
+        detailValue: number | null;
+      } => point.value !== null && !Number.isNaN(point.value),
     );
 
   const values = chartPoints.map((point) => point.value);
   const labels = chartPoints.map((point) => point.label);
+  const detailValues = chartPoints.map((point) => point.detailValue);
 
   const average =
     values.length > 0
       ? values.reduce((sum, value) => sum + value, 0) / values.length
       : 0;
+  const averageDetail =
+    detailValues.filter((value): value is number => value !== null).length > 0
+      ? detailValues
+          .filter((value): value is number => value !== null)
+          .reduce((sum, value) => sum + value, 0) /
+        detailValues.filter((value): value is number => value !== null).length
+      : null;
   const best =
     values.length > 0 ? Math.max(...values) : 0;
   const trend = (() => {
@@ -327,7 +338,16 @@ export default function TeamDetailPage() {
   })();
   const displayedMatches = [...matches].reverse();
   const pageLoading = eventLoading || loading;
-  const displayName = teamDisplayName(teamSummary?.name || overview?.name || '');
+  const tbaFallbackName =
+    tbaTeams.find((team) => team.key === teamKey)?.nickname ??
+    tbaTeams.find((team) => team.key === teamKey)?.name ??
+    '';
+  const displayName = resolveTeamDisplayName({
+    analyticsName: teamSummary?.name || overview?.name || '',
+    detail,
+    eventKey: selectedEventKey,
+    fallbackName: tbaFallbackName,
+  });
 
   const statSections: StatSection[] = overview
     ? [
@@ -335,28 +355,16 @@ export default function TeamDetailPage() {
           label: 'Auto',
           items: [
             {
-              label: 'Cycle Score',
-              value: overview.robot.autoCycleScore.toFixed(1),
-              subtitle: 'cycle score',
-              rankKey: 'autoCycleScore',
+              label: 'APC',
+              value: overview.robot.autoFuelApc.toFixed(1),
+              subtitle: 'auto fuel per cycle',
+              rankKey: 'autoFuelApc',
             },
             {
-              label: 'Cycle Rate',
-              value: overview.robot.autoCycleRate.toFixed(1),
-              subtitle: 'average cycle rate',
-              rankKey: 'autoCycleRate',
-            },
-            {
-              label: 'Cycle Count',
+              label: 'Cycles',
               value: overview.robot.autoCycleCountAvg.toFixed(1),
               subtitle: 'average cycles',
               rankKey: 'autoCycleCountAvg',
-            },
-            {
-              label: 'Accuracy',
-              value: formatPercent(overview.robot.autoCycleAccuracy),
-              subtitle: 'cycle accuracy',
-              rankKey: 'autoCycleAccuracy',
             },
             {
               label: 'Tower',
@@ -370,28 +378,16 @@ export default function TeamDetailPage() {
           label: 'Teleop',
           items: [
             {
-              label: 'Cycle Score',
-              value: overview.robot.teleCycleScore.toFixed(1),
-              subtitle: 'cycle score',
-              rankKey: 'teleCycleScore',
+              label: 'APC',
+              value: overview.robot.teleFuelApc.toFixed(1),
+              subtitle: 'tele fuel per cycle',
+              rankKey: 'teleFuelApc',
             },
             {
-              label: 'Cycle Rate',
-              value: overview.robot.teleCycleRate.toFixed(1),
-              subtitle: 'average cycle rate',
-              rankKey: 'teleCycleRate',
-            },
-            {
-              label: 'Cycle Count',
+              label: 'Cycles',
               value: overview.robot.teleCycleCountAvg.toFixed(1),
               subtitle: 'average cycles',
               rankKey: 'teleCycleCountAvg',
-            },
-            {
-              label: 'Accuracy',
-              value: formatPercent(overview.robot.teleCycleAccuracy),
-              subtitle: 'cycle accuracy',
-              rankKey: 'teleCycleAccuracy',
             },
             {
               label: 'Tower',
@@ -531,20 +527,16 @@ export default function TeamDetailPage() {
                 </strong>
               </div>
               <div className="hero-stat">
-                <span>Auto score</span>
-                <strong>{overview.robot.autoCycleScore.toFixed(1)}</strong>
+                <span>Auto APC</span>
+                <strong>{overview.robot.autoFuelApc.toFixed(1)}</strong>
               </div>
               <div className="hero-stat">
-                <span>Tele score</span>
-                <strong>{overview.robot.teleCycleScore.toFixed(1)}</strong>
+                <span>Tele APC</span>
+                <strong>{overview.robot.teleFuelApc.toFixed(1)}</strong>
               </div>
               <div className="hero-stat">
                 <span>Total defense</span>
                 <strong>{overview.robot.totalDefenseScore.toFixed(1)}</strong>
-              </div>
-              <div className="hero-stat hero-stat-accent">
-                <span>Recovery</span>
-                <strong>{formatPercent(overview.robot.failureRecovery)}</strong>
               </div>
             </div>
           </section>
@@ -577,6 +569,9 @@ export default function TeamDetailPage() {
                 values={values}
                 labels={labels}
                 formatValue={selectedMetric.format}
+                detailValues={detailValues}
+                formatDetail={selectedMetric.detailFormat}
+                averageDetailValue={averageDetail}
               />
 
               <div className="trend-summary-grid">
@@ -702,11 +697,11 @@ export default function TeamDetailPage() {
                       <div className="match-metric-grid">
                         <div>
                           <span>Auto</span>
-                          <strong>{match.robot.auto.cycles.cycleScoreAvg.toFixed(1)}</strong>
+                          <strong>{getPhaseMatchScore(match.robot.auto).toFixed(1)}</strong>
                         </div>
                         <div>
                           <span>Tele</span>
-                          <strong>{match.robot.tele.cycles.cycleScoreAvg.toFixed(1)}</strong>
+                          <strong>{getPhaseMatchScore(match.robot.tele).toFixed(1)}</strong>
                         </div>
                         <div>
                           <span>Defense</span>
