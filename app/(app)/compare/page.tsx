@@ -18,6 +18,7 @@ import {
   type MatchCounts,
 } from '@/lib/event-stats';
 import { formatPercent } from '@/lib/format';
+import { buildAllianceFit } from '@/lib/strategist';
 import {
   teamAvatarUrl,
   teamDisplayName,
@@ -412,6 +413,20 @@ export default function ComparePage() {
     selectedTeams.length > 0
       ? Math.min(...selectedTeams.map((entry) => entry.team.tba.rank))
       : null;
+  const allianceFit =
+    selectedTeams.length >= 2
+      ? buildAllianceFit(
+          teams,
+          selectedTeams.map((entry) => entry.team),
+        )
+      : null;
+  const selectedCoverage =
+    selectedTeams.length > 0
+      ? selectedTeams.reduce(
+          (sum, entry) => sum + getCoverageValue(entry.team, countsMap),
+          0,
+        ) / selectedTeams.length
+      : 0;
 
   const rankMaps = {
     autoFuelApc: buildRankMap(teams, (team) => team.robot.autoFuelApc),
@@ -589,6 +604,72 @@ export default function ComparePage() {
                       );
                     })}
                   </section>
+
+                  {allianceFit ? (
+                    <section className="surface-card animate-in">
+                      <div className="section-heading">
+                        <div>
+                          <div className="section-kicker">Strategist</div>
+                          <h2>Alliance Fit</h2>
+                        </div>
+                        <span className={`fit-pill fit-pill-${allianceFit.tone}`}>
+                          {allianceFit.headline}
+                        </span>
+                      </div>
+
+                      <div className="alliance-fit-layout">
+                        <article className="alliance-fit-score-card">
+                          <span className="section-kicker">Fit Score</span>
+                          <strong>{allianceFit.score}</strong>
+                          <p>{allianceFit.summary}</p>
+                          <small>Confidence: {formatPercent(selectedCoverage)}</small>
+                        </article>
+
+                        <div className="alliance-fit-breakdown">
+                          {allianceFit.breakdown.map((item) => (
+                            <article key={item.label} className="alliance-fit-breakdown-card">
+                              <span>{item.label}</span>
+                              <strong>{item.score}</strong>
+                              <small>{item.detail}</small>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="alliance-fit-role-grid">
+                        {allianceFit.assignments.map((assignment) => {
+                          const team = teamByKey[assignment.teamKey];
+                          return (
+                            <article
+                              key={`${assignment.role}-${assignment.teamKey}`}
+                              className="alliance-fit-role-card"
+                            >
+                              <span>{assignment.role}</span>
+                              <strong>
+                                Team {teamNumberFromKey(assignment.teamKey)}
+                              </strong>
+                              <small>
+                                {team ? resolveTeamName(team, tbaNameByKey) : assignment.teamKey}
+                              </small>
+                              <em>
+                                {assignment.statLabel}: {assignment.statValue}
+                              </em>
+                            </article>
+                          );
+                        })}
+                      </div>
+
+                      {allianceFit.risks.length > 0 ? (
+                        <div className="alliance-fit-risk-list">
+                          {allianceFit.risks.map((risk) => (
+                            <div key={risk} className="alliance-fit-risk-item">
+                              {risk}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : null}
 
                   {metricSections.map((section) => (
                     <section key={section.label} className="surface-card animate-in">

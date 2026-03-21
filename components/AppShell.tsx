@@ -72,13 +72,19 @@ function ShellFrame({ children }: { children: ReactNode }) {
   const onTeamPage = pathname?.startsWith('/teams/') ?? false;
   const onAnalysisPage = pathname === '/analysis';
   const onComparePage = pathname === '/compare';
+  const onMatchesPage = pathname === '/matches' || (pathname?.startsWith('/matches/') ?? false);
+  const onPredictorPage = pathname === '/predictor';
   const pageTitle = onTeamPage
     ? 'Team'
     : onAnalysisPage
       ? 'Analysis'
       : onComparePage
         ? 'Compare'
-        : 'Overview';
+        : onMatchesPage
+          ? 'Matches'
+          : onPredictorPage
+            ? 'Predictor'
+          : 'Overview';
   const menuButtonLabel = isMobileViewport
     ? navOpen
       ? 'Close'
@@ -163,6 +169,22 @@ function ShellFrame({ children }: { children: ReactNode }) {
             >
               <span className="nav-link-copy">
                 <strong>Compare</strong>
+              </span>
+            </Link>
+            <Link
+              href="/matches"
+              className={`nav-link ${onMatchesPage ? 'active' : ''}`}
+            >
+              <span className="nav-link-copy">
+                <strong>Matches</strong>
+              </span>
+            </Link>
+            <Link
+              href="/predictor"
+              className={`nav-link ${onPredictorPage ? 'active' : ''}`}
+            >
+              <span className="nav-link-copy">
+                <strong>Predictor</strong>
               </span>
             </Link>
           </nav>
