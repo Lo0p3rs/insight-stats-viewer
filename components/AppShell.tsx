@@ -1,264 +1,123 @@
-'use client';
+"use client"
 
-import { useEffect, useState, type ReactNode } from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import EventPicker from '@/components/EventPicker';
-import RetryError from '@/components/RetryError';
-import { clearToken, getToken } from '@/lib/auth';
-import { EventProvider, useEventContext } from '@/lib/event-context';
+import Link from "next/link"
+import { useEffect, type ReactNode } from "react"
+import { usePathname, useRouter } from "next/navigation"
+
+import EventPicker from "@/components/EventPicker"
+import RetryError from "@/components/RetryError"
+import { Button } from "@/components/ui/button"
+import { clearToken, getToken } from "@/lib/auth"
+import { EventProvider, useEventContext } from "@/lib/event-context"
+import { cn } from "@/lib/utils"
+
+function getPageLabel(pathname: string | null) {
+  if (!pathname) {
+    return "Rankings"
+  }
+
+  if (pathname.startsWith("/teams/")) {
+    return "Team Profile"
+  }
+
+  if (pathname.startsWith("/defenders")) {
+    return "Defenders"
+  }
+
+  return "Rankings"
+}
 
 function ShellFrame({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const [navOpen, setNavOpen] = useState(false);
-  const [navCollapsed, setNavCollapsed] = useState(false);
-  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const pathname = usePathname()
+  const router = useRouter()
   const {
-    events,
     selectedEvent,
+    events,
     selectedEventKey,
     setEventKey,
     refreshEvents,
     loading,
     error,
-  } = useEventContext();
+  } = useEventContext()
 
   useEffect(() => {
     if (!getToken()) {
-      router.replace('/login');
+      router.replace("/login")
     }
-  }, [router]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const syncViewport = () => {
-      setIsMobileViewport(window.innerWidth <= 960);
-    };
-
-    syncViewport();
-    window.addEventListener('resize', syncViewport);
-
-    return () => {
-      window.removeEventListener('resize', syncViewport);
-    };
-  }, []);
-
-  useEffect(() => {
-    setNavOpen(false);
-  }, [pathname]);
-
-  const toggleNavigation = () => {
-    if (isMobileViewport) {
-      setNavOpen((value) => !value);
-      return;
-    }
-
-    setNavCollapsed((value) => !value);
-  };
-
-  const closeNavigation = () => {
-    if (isMobileViewport) {
-      setNavOpen(false);
-      return;
-    }
-
-    setNavCollapsed(true);
-  };
-
-  const onTeamPage = pathname?.startsWith('/teams/') ?? false;
-  const onAnalysisPage = pathname === '/analysis';
-  const onComparePage = pathname === '/compare';
-  const onMatchesPage = pathname === '/matches' || (pathname?.startsWith('/matches/') ?? false);
-  const onPredictorPage = pathname === '/predictor';
-  const pageTitle = onTeamPage
-    ? 'Team'
-    : onAnalysisPage
-      ? 'Analysis'
-      : onComparePage
-        ? 'Compare'
-        : onMatchesPage
-          ? 'Matches'
-          : onPredictorPage
-            ? 'Predictor'
-          : 'Overview';
-  const menuButtonLabel = isMobileViewport
-    ? navOpen
-      ? 'Close'
-      : 'Menu'
-    : navCollapsed
-      ? 'Menu'
-      : 'Hide';
+  }, [router])
 
   return (
-    <div className={`app-shell ${navCollapsed ? 'nav-collapsed' : ''}`}>
-      <aside
-        className={`nav ${navOpen ? 'open' : ''} ${
-          navCollapsed ? 'nav-desktop-hidden' : ''
-        }`}
-      >
-        <div className="nav-header">
-          <div>
-            <div className="nav-eyebrow">Future Martians</div>
-            <div className="nav-title">InSight</div>
-          </div>
-          {isMobileViewport ? (
-            <button
-              type="button"
-              className="nav-close"
-              onClick={closeNavigation}
-              aria-label="Close navigation"
-            >
-              <span className="nav-close-icon" aria-hidden="true">
-                ×
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/90 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-[1560px] flex-col gap-3 px-4 py-3 md:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Future Martians
+            </p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold tracking-tight">Insight</h1>
+              <span className="text-muted-foreground">/</span>
+              <span className="text-sm text-muted-foreground">
+                {getPageLabel(pathname)}
               </span>
-              <span className="nav-close-copy">Close</span>
-            </button>
-          ) : null}
-        </div>
-
-        <section className="nav-section nav-section-emphasis">
-          <div className="nav-section-heading">
-            <span className="nav-section-title">Event</span>
-            <span className="nav-section-value">{events.length} loaded</span>
+            </div>
+            <p className="truncate text-sm text-muted-foreground">
+              {selectedEvent?.name ?? "Choose an event"}
+            </p>
+            <nav className="mt-2 flex flex-wrap items-center gap-1">
+              {[
+                { href: "/overview", label: "Rankings", active: pathname === "/overview" },
+                { href: "/defenders", label: "Defenders", active: pathname === "/defenders" },
+              ].map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                    item.active
+                      ? "border-border bg-secondary text-foreground"
+                      : "border-transparent text-muted-foreground hover:border-border/80 hover:bg-accent hover:text-foreground"
+                  )}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
           </div>
-          <EventPicker
-            events={events}
-            selectedEventKey={selectedEventKey}
-            loading={loading}
-            onSelect={setEventKey}
-          />
-          {error ? (
-            <RetryError
-              compact
-              error={error}
-              onRetry={() => void refreshEvents()}
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <EventPicker
+              events={events}
+              selectedEventKey={selectedEventKey}
+              loading={loading}
+              onSelect={setEventKey}
             />
-          ) : null}
-        </section>
-
-        <section className="nav-section">
-          <div className="nav-section-heading">
-            <span className="nav-section-title">Pages</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 justify-center border border-border/70 bg-muted/20 text-foreground hover:bg-accent"
+              onClick={() => {
+                clearToken()
+                router.replace("/login")
+              }}
+            >
+              Log out
+            </Button>
           </div>
-          <nav className="nav-links">
-            <Link
-              href="/overview"
-              className={`nav-link ${
-                pathname === '/overview' || onTeamPage ? 'active' : ''
-              }`}
-            >
-              <span className="nav-link-copy">
-                <strong>Overview</strong>
-              </span>
-            </Link>
-            <Link
-              href="/analysis"
-              className={`nav-link ${onAnalysisPage ? 'active' : ''}`}
-            >
-              <span className="nav-link-copy">
-                <strong>Analysis</strong>
-              </span>
-            </Link>
-            <Link
-              href="/compare"
-              className={`nav-link ${onComparePage ? 'active' : ''}`}
-            >
-              <span className="nav-link-copy">
-                <strong>Compare</strong>
-              </span>
-            </Link>
-            <Link
-              href="/matches"
-              className={`nav-link ${onMatchesPage ? 'active' : ''}`}
-            >
-              <span className="nav-link-copy">
-                <strong>Matches</strong>
-              </span>
-            </Link>
-            <Link
-              href="/predictor"
-              className={`nav-link ${onPredictorPage ? 'active' : ''}`}
-            >
-              <span className="nav-link-copy">
-                <strong>Predictor</strong>
-              </span>
-            </Link>
-          </nav>
-        </section>
-
-        <div className="nav-footer">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => void refreshEvents()}
-            disabled={loading}
-          >
-            {loading ? 'Refreshing...' : 'Refresh events'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => {
-              clearToken();
-              router.replace('/login');
-            }}
-          >
-            Log out
-          </button>
         </div>
-      </aside>
+      </header>
 
-      <div className="content">
-        <header className="workspace-topbar">
-          <div className="workspace-heading">
-            <button
-              type="button"
-              className="menu-toggle"
-              onClick={toggleNavigation}
-              aria-label={menuButtonLabel}
-            >
-              <span className="menu-toggle-icon" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-              <span className="menu-toggle-copy">
-                <strong>{menuButtonLabel}</strong>
-              </span>
-            </button>
-            <div>
-              <div className="workspace-title">{pageTitle}</div>
-            </div>
-          </div>
-
-          <div className="workspace-actions">
-            <div className="workspace-badge">
-              <span>Event</span>
-              <strong>{selectedEvent?.name ?? 'No event selected'}</strong>
-              <small>
-                {selectedEvent ? selectedEvent.eventKey : 'Select an event'}
-              </small>
-            </div>
-          </div>
-        </header>
-
-        <main className="workspace-main">{children}</main>
-      </div>
-
-      {navOpen ? (
-        <button
-          type="button"
-          className="nav-overlay"
-          aria-label="Close navigation"
-          onClick={() => setNavOpen(false)}
-        />
+      {error ? (
+        <div className="mx-auto w-full max-w-[1560px] px-4 pt-4 md:px-6">
+          <RetryError compact error={error} onRetry={() => void refreshEvents()} />
+        </div>
       ) : null}
+
+      <main className="mx-auto w-full max-w-[1560px] px-4 py-5 md:px-6 md:py-6">
+        {children}
+      </main>
     </div>
-  );
+  )
 }
 
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -266,5 +125,5 @@ export default function AppShell({ children }: { children: ReactNode }) {
     <EventProvider>
       <ShellFrame>{children}</ShellFrame>
     </EventProvider>
-  );
+  )
 }

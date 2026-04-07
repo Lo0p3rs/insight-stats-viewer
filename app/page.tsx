@@ -1,24 +1,31 @@
-'use client';
+"use client"
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { getToken } from '@/lib/auth';
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+
+import { Card, CardContent } from "@/components/ui/card"
+import { getToken } from "@/lib/auth"
 
 export default function HomePage() {
-  const router = useRouter();
+  const router = useRouter()
 
   useEffect(() => {
-    const token = getToken();
-    router.replace(token ? '/overview' : '/login');
-  }, [router]);
+    router.replace(getToken() ? "/overview" : "/login")
+  }, [router])
 
   return (
-    <div className="page-center">
-      <div className="card loading-panel animate-in">
-        <div className="hero-kicker">Insight</div>
-        <h1>Loading your workspace...</h1>
-        <p className="muted">Checking your session and opening the latest view.</p>
-      </div>
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <Card className="w-full max-w-sm border-border/70 bg-card/80">
+        <CardContent className="space-y-2 p-6">
+          <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            Insight
+          </p>
+          <h1 className="text-xl font-semibold tracking-tight">Opening site</h1>
+          <p className="text-sm text-muted-foreground">
+            Checking your session and loading the latest event.
+          </p>
+        </CardContent>
+      </Card>
     </div>
-  );
+  )
 }

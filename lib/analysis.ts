@@ -266,13 +266,6 @@ export function buildTeamStatMetrics(teams: TeamAnalytics[], team: TeamAnalytics
     buildRankedMetric(
       teams,
       team,
-      'Human Accuracy',
-      (entry) => entry.humanPlayer.accuracy,
-      (value) => `${(value * 100).toFixed(0)}%`,
-    ),
-    buildRankedMetric(
-      teams,
-      team,
       'Reliability',
       (entry) => 1 - entry.robot.failureCount / Math.max(1, entry.robot.failureCount + 1),
       (value) => `${(value * 100).toFixed(0)}%`,

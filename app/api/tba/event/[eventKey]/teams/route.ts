@@ -1,15 +1,8 @@
 import type { NextRequest } from 'next/server';
+import { getServerConfig } from '@/lib/server-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const TBA_API_BASE =
-  process.env.TBA_API_BASE ??
-  'https://www.thebluealliance.com/api/v3';
-
-const TBA_API_KEY =
-  process.env.TBA_API_KEY ??
-  'R6A3yk0pc4VnGNoEWvdN2jIsGUhlOCVIKAgJ0uaUotH6Vbw2GaSKrdcMoW232UtP';
 
 function createTimeoutSignal(timeoutMs: number) {
   const controller = new AbortController();
@@ -24,16 +17,17 @@ export async function GET(
   _request: NextRequest,
   context: { params: { eventKey: string } },
 ) {
-  const timeout = createTimeoutSignal(20000);
+  const { tbaApiBase, tbaApiKey, tbaProxyTimeoutMs } = getServerConfig();
+  const timeout = createTimeoutSignal(tbaProxyTimeoutMs);
   const eventKey = encodeURIComponent(context.params.eventKey);
-  const base = TBA_API_BASE.endsWith('/') ? TBA_API_BASE.slice(0, -1) : TBA_API_BASE;
+  const base = tbaApiBase.endsWith('/') ? tbaApiBase.slice(0, -1) : tbaApiBase;
   const targetUrl = `${base}/event/${eventKey}/teams/simple`;
 
   try {
     const response = await fetch(targetUrl, {
       headers: {
         Accept: 'application/json',
-        'X-TBA-Auth-Key': TBA_API_KEY,
+        'X-TBA-Auth-Key': tbaApiKey,
       },
       cache: 'no-store',
       signal: timeout.signal,

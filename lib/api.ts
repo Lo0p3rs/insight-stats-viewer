@@ -1,11 +1,28 @@
 import type {
   Event,
   EventMatch,
+  EventTeam,
+  MatchCycleData,
+  MatchDefenseData,
+  MatchDefenseSide,
+  MatchFailureData,
+  MatchMobilityData,
+  MatchPassingData,
+  MatchPhaseData,
+  MatchRobotData,
+  MatchTowerData,
+  Scout,
+  ScoutNote,
   TbaEventMatch,
   TbaTeamSimple,
   TeamAnalytics,
   TeamDetail,
   TeamMatchAnalytics,
+  TeamSummary,
+  TeamSummaryDefenseItem,
+  TeamSummaryDefenseWhenUsed,
+  TeamSummaryEvidence,
+  TeamSummaryNotes,
 } from '@/lib/types';
 import {
   AppException,
@@ -42,30 +59,61 @@ function buildTbaUrl(path: string) {
 }
 
 function toNumber(value: unknown, fallback = 0): number {
-  if (typeof value === 'number' && !Number.isNaN(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    if (!Number.isNaN(parsed)) return parsed;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
   }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
   return fallback;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
 }
 
 function toString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+function toOptionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function toBoolean(value: unknown) {
+  return value === true;
+}
+
 function extractErrorMessage(data: unknown): string | null {
   if (!data) return null;
-  if (typeof data === 'string' && data.trim() !== '') return data;
+  if (typeof data === 'string' && data.trim()) return data;
+
   if (typeof data === 'object' && data !== null) {
-    const obj = data as Record<string, unknown>;
-    const detail = obj.detail;
-    if (typeof detail === 'string' && detail.trim() !== '') return detail;
-    const message = obj.message;
-    if (typeof message === 'string' && message.trim() !== '') return message;
-    const error = obj.error;
-    if (typeof error === 'string' && error.trim() !== '') return error;
+    const objectValue = data as Record<string, unknown>;
+    const detail = objectValue.detail;
+    if (typeof detail === 'string' && detail.trim()) return detail;
+    const message = objectValue.message;
+    if (typeof message === 'string' && message.trim()) return message;
+    const error = objectValue.error;
+    if (typeof error === 'string' && error.trim()) return error;
   }
+
   return null;
 }
 
@@ -253,6 +301,7 @@ export async function loginWithCode(code: string): Promise<string> {
     if (typeof token !== 'string') {
       throw new UnknownException('Token missing in login response.');
     }
+
     return token;
   } catch (error) {
     throw normalizeThrownError(error);
@@ -261,38 +310,34 @@ export async function loginWithCode(code: string): Promise<string> {
 
 export async function fetchEvents(token: string): Promise<Event[]> {
   const data = await apiFetch<unknown[]>('/events', token);
+
   return data
-    .map((item) => ({
-      name: toString((item as Record<string, unknown>).name),
-      eventKey: toString(
-        (item as Record<string, unknown>).event_key ??
-          (item as Record<string, unknown>).eventKey,
-      ),
-      startDate: toString(
-        (item as Record<string, unknown>).start_date ??
-          (item as Record<string, unknown>).startDate,
-      ),
-      configured:
-        (item as Record<string, unknown>).configured === true,
-    }))
+    .map((item) => {
+      const event = item as Record<string, unknown>;
+      return {
+        name: toString(event.name),
+        eventKey: toString(event.event_key ?? event.eventKey),
+        startDate: toString(event.start_date ?? event.startDate),
+        configured: event.configured === true,
+      };
+    })
     .filter((event) => event.configured && event.eventKey);
 }
 
 function parseAlliance(raw: unknown) {
   const data = (raw as Record<string, unknown>) ?? {};
+
   return {
     teamKeys: Array.isArray(data.team_keys)
-      ? data.team_keys
-          .filter((teamKey): teamKey is string => typeof teamKey === 'string')
+      ? data.team_keys.filter((teamKey): teamKey is string => typeof teamKey === 'string')
       : [],
-    score:
-      typeof data.score === 'number' && !Number.isNaN(data.score)
-        ? data.score
-        : null,
+    score: toNullableNumber(data.score),
+    autoScore: toNullableNumber(data.auto_score),
+    teleopScore: toNullableNumber(data.teleop_score),
   };
 }
 
-function parseEventMatch(raw: Record<string, unknown>): EventMatch {
+export function parseEventMatch(raw: Record<string, unknown>): EventMatch {
   const alliances = (raw.alliances as Record<string, unknown>) ?? {};
   const scoutingStatus = (raw.scouting_status as Record<string, unknown>) ?? {};
 
@@ -308,14 +353,10 @@ function parseEventMatch(raw: Record<string, unknown>): EventMatch {
     },
     scoutingStatus: {
       robot: Array.isArray(scoutingStatus.robot)
-        ? scoutingStatus.robot.filter(
-            (teamKey): teamKey is string => typeof teamKey === 'string',
-          )
+        ? scoutingStatus.robot.filter((teamKey): teamKey is string => typeof teamKey === 'string')
         : [],
       ai: Array.isArray(scoutingStatus.ai)
-        ? scoutingStatus.ai.filter(
-            (teamKey): teamKey is string => typeof teamKey === 'string',
-          )
+        ? scoutingStatus.ai.filter((teamKey): teamKey is string => typeof teamKey === 'string')
         : [],
       humanPlayer: Array.isArray(scoutingStatus.human_player)
         ? scoutingStatus.human_player.filter(
@@ -368,7 +409,7 @@ function parseTbaEventMatch(raw: Record<string, unknown>): TbaEventMatch {
   };
 }
 
-function parseTbaTeamSimple(raw: Record<string, unknown>): TbaTeamSimple {
+export function parseTbaTeamSimple(raw: Record<string, unknown>): TbaTeamSimple {
   return {
     key: toString(raw.key),
     teamNumber: toNumber(raw.team_number),
@@ -385,6 +426,7 @@ export async function fetchEventMatches(
     `/events/${encodeURIComponent(eventKey)}/matches`,
     token,
   );
+
   return data.map((item) => parseEventMatch(item as Record<string, unknown>));
 }
 
@@ -392,6 +434,7 @@ export async function fetchTbaEventMatches(eventKey: string): Promise<TbaEventMa
   const data = await proxyFetch<unknown[]>(
     buildTbaUrl(`/event/${encodeURIComponent(eventKey)}/matches`),
   );
+
   return data.map((item) => parseTbaEventMatch(item as Record<string, unknown>));
 }
 
@@ -399,26 +442,195 @@ export async function fetchTbaEventTeams(eventKey: string): Promise<TbaTeamSimpl
   const data = await proxyFetch<unknown[]>(
     buildTbaUrl(`/event/${encodeURIComponent(eventKey)}/teams`),
   );
+
   return data.map((item) => parseTbaTeamSimple(item as Record<string, unknown>));
 }
 
-function parseTeamAnalytics(raw: Record<string, unknown>): TeamAnalytics {
+function parseEventTeam(raw: Record<string, unknown>): EventTeam {
+  return {
+    eventKey: toString(raw.event_key ?? raw.eventKey),
+    teamKey: toString(raw.team_key ?? raw.teamKey),
+    number: toNumber(raw.number),
+    name: toString(raw.name),
+  };
+}
+
+export async function fetchEventTeams(
+  token: string,
+  eventKey: string,
+): Promise<EventTeam[]> {
+  const data = await apiFetch<unknown[]>(
+    `/events/${encodeURIComponent(eventKey)}/teams`,
+    token,
+  );
+
+  return data.map((item) => parseEventTeam(item as Record<string, unknown>));
+}
+
+function parseScout(raw: Record<string, unknown>): Scout {
+  return {
+    id: toString(raw.id),
+    name: toString(raw.name),
+  };
+}
+
+export async function fetchScouts(token: string): Promise<Scout[]> {
+  const data = await apiFetch<unknown[]>('/scouts', token);
+  return data.map((item) => parseScout(item as Record<string, unknown>));
+}
+
+function parseScoutNote(raw: Record<string, unknown>): ScoutNote {
+  return {
+    id: toString(raw.id),
+    scoutId: toString(raw.scout_id ?? raw.scoutId),
+    content: toString(raw.content),
+    createdAt: toString(raw.created_at ?? raw.createdAt),
+    matchKey: toOptionalString(raw.match_key ?? raw.matchKey),
+  };
+}
+
+function parseTeamSummaryDefenseWhenUsed(raw: Record<string, unknown>): TeamSummaryDefenseWhenUsed {
+  return {
+    matchPhase: toString(raw.match_phase ?? raw.matchPhase, 'unknown') as TeamSummaryDefenseWhenUsed['matchPhase'],
+    situation: toOptionalString(raw.situation),
+  };
+}
+
+function parseTeamSummaryDefenseItem(raw: Record<string, unknown>): TeamSummaryDefenseItem {
+  return {
+    strategy: toString(raw.strategy, 'other') as TeamSummaryDefenseItem['strategy'],
+    description: toString(raw.description),
+    whenUsed: parseTeamSummaryDefenseWhenUsed(
+      (raw.when_used as Record<string, unknown>) ?? {},
+    ),
+    defenseEffectiveness: toString(
+      raw.defense_effectiveness ?? raw.defenseEffectiveness,
+      'unknown',
+    ) as TeamSummaryDefenseItem['defenseEffectiveness'],
+    driverQuality: toString(
+      raw.driver_quality ?? raw.driverQuality,
+      'unknown',
+    ) as TeamSummaryDefenseItem['driverQuality'],
+    foulRisk: toString(
+      raw.foul_risk ?? raw.foulRisk,
+      'unknown',
+    ) as TeamSummaryDefenseItem['foulRisk'],
+    supportingMatches: Array.isArray(raw.supporting_matches)
+      ? raw.supporting_matches.filter((value): value is string => typeof value === 'string')
+      : [],
+    confidence: toString(raw.confidence, 'low') as TeamSummaryDefenseItem['confidence'],
+  };
+}
+
+function parseTeamSummaryNotes(raw: Record<string, unknown>): TeamSummaryNotes {
+  return {
+    strengths: Array.isArray(raw.strengths)
+      ? raw.strengths.filter((value): value is string => typeof value === 'string')
+      : [],
+    concerns: Array.isArray(raw.concerns)
+      ? raw.concerns.filter((value): value is string => typeof value === 'string')
+      : [],
+    allianceFit: Array.isArray(raw.alliance_fit)
+      ? raw.alliance_fit.filter((value): value is string => typeof value === 'string')
+      : [],
+    isolatedNotes: Array.isArray(raw.isolated_notes)
+      ? raw.isolated_notes.filter((value): value is string => typeof value === 'string')
+      : [],
+  };
+}
+
+function parseTeamSummaryEvidence(raw: Record<string, unknown>): TeamSummaryEvidence {
+  return {
+    robotReportCount: toNumber(raw.robot_report_count ?? raw.robotReportCount),
+    matchCount: toNumber(raw.match_count ?? raw.matchCount),
+    generalNoteCount: toNumber(raw.general_note_count ?? raw.generalNoteCount),
+    defenseNoteCount: toNumber(raw.defense_note_count ?? raw.defenseNoteCount),
+    scoutNoteCount: toNumber(raw.scout_note_count ?? raw.scoutNoteCount),
+    lastMatchKey: toOptionalString(raw.last_match_key ?? raw.lastMatchKey),
+  };
+}
+
+function parseTeamSummary(raw: Record<string, unknown>): TeamSummary {
+  return {
+    status: toString(raw.status, 'insufficient_data') as TeamSummary['status'],
+    defense: Array.isArray(raw.defense)
+      ? raw.defense.map((item) =>
+          parseTeamSummaryDefenseItem(item as Record<string, unknown>),
+        )
+      : [],
+    notes: parseTeamSummaryNotes((raw.notes as Record<string, unknown>) ?? {}),
+    summaryText: toOptionalString(raw.summary_text ?? raw.summaryText),
+    evidence: parseTeamSummaryEvidence((raw.evidence as Record<string, unknown>) ?? {}),
+    generatedAt: toOptionalString(raw.generated_at ?? raw.generatedAt),
+  };
+}
+
+function parseTeamRobotOverview(raw: Record<string, unknown>): TeamAnalytics['robot'] {
+  const intakeDefenseScore = toNumber(raw.intake_defense_score);
+  const scoringDefenseScore = toNumber(raw.scoring_defense_score);
+  const totalDefenseScore = toNumber(
+    raw.total_defense_score,
+    intakeDefenseScore + scoringDefenseScore,
+  );
+
+  return {
+    autoFuelCount: toNullableNumber(raw.auto_fuel_count),
+    autoFuelApc: toNumber(raw.auto_fuel_apc ?? raw.autoFuelApc),
+    autoCycleScore: toNumber(raw.auto_cycle_score),
+    autoCycleCountAvg: toNumber(raw.auto_cycle_count_avg),
+    autoCycleFuelCountAvg: toNullableNumber(raw.auto_cycle_fuel_count_avg),
+    autoCycleAccuracy: toNumber(raw.auto_cycle_accuracy),
+    autoTowerReliability: toNumber(raw.auto_tower_reliability),
+    teleFuelCount: toNullableNumber(raw.tele_fuel_count),
+    teleFuelApc: toNumber(raw.tele_fuel_apc ?? raw.teleFuelApc),
+    teleCycleScore: toNumber(raw.tele_cycle_score),
+    teleCycleCountAvg: toNumber(raw.tele_cycle_count_avg),
+    teleCycleFuelCountAvg: toNullableNumber(raw.tele_cycle_fuel_count_avg),
+    teleCycleAccuracy: toNumber(raw.tele_cycle_accuracy),
+    teleTowerLevel: toString(raw.tele_tower_level, 'none'),
+    teleTowerReliability: toNumber(raw.tele_tower_reliability),
+    drivetrain: toOptionalString(raw.drivetrain),
+    autoPathSingleLeftCount: toNumber(raw.auto_path_single_left_count),
+    autoPathSingleRightCount: toNumber(raw.auto_path_single_right_count),
+    autoPathDoubleLeftCount: toNumber(raw.auto_path_double_left_count),
+    autoPathDoubleRightCount: toNumber(raw.auto_path_double_right_count),
+    autoPathOutpostCount: toNumber(raw.auto_path_outpost_count),
+    autoPathDepotCount: toNumber(raw.auto_path_depot_count),
+    autoPathOutpostAndDepotCount: toNumber(raw.auto_path_outpost_and_depot_count),
+    autoPathPreloadCount: toNumber(raw.auto_path_preload_count),
+    autoPathNoPathCount: toNumber(raw.auto_path_no_path_count),
+    intakeDefenseCount: toNumber(raw.intake_defense_count),
+    intakeDefenseEffectiveness: toNumber(raw.intake_defense_effectiveness),
+    scoringDefenseCount: toNumber(raw.scoring_defense_count),
+    scoringDefenseEffectiveness: toNumber(raw.scoring_defense_effectiveness),
+    intakeDefenseScore,
+    scoringDefenseScore,
+    totalDefenseScore,
+    defenseScore: toNumber(raw.defense_score, totalDefenseScore),
+    defenseUnawareCount: toNumber(raw.defense_unaware_count),
+    defensePenaltyProneCount: toNumber(raw.defense_penalty_prone_count),
+    defenseRecklessCount: toNumber(raw.defense_reckless_count),
+    defenseShutDownCount: toNumber(raw.defense_shut_down_count),
+    defenseEliteDrivingCount: toNumber(raw.defense_elite_driving_count),
+    failureCount: toNumber(raw.failure_count),
+    failureRecovery: toNumber(raw.failure_recovery),
+    scoutNotes: Array.isArray(raw.scout_notes)
+      ? raw.scout_notes.map((item) => parseScoutNote(item as Record<string, unknown>))
+      : [],
+  };
+}
+
+export function parseTeamAnalytics(raw: Record<string, unknown>): TeamAnalytics {
   const tbaRaw = (raw.tba as Record<string, unknown>) ?? {};
   const robotRaw = (raw.robot as Record<string, unknown>) ?? {};
-  const humanRaw = (raw.human_player as Record<string, unknown>) ??
+  const humanRaw =
+    (raw.human_player as Record<string, unknown>) ??
     (raw.humanPlayer as Record<string, unknown>) ??
     {};
-  const intakeDefenseScore = toNumber(robotRaw.intake_defense_score);
-  const scoringDefenseScore = toNumber(robotRaw.scoring_defense_score);
-  const totalDefenseScore =
-    toNumber(robotRaw.total_defense_score) ||
-    intakeDefenseScore + scoringDefenseScore;
 
   const scoutedRaw =
     (raw.scouted_matches as number | undefined) ??
     (raw.matches_scouted as number | undefined);
-  const scoutedMatches =
-    typeof scoutedRaw === 'number' ? scoutedRaw : undefined;
 
   return {
     name: toString(raw.name),
@@ -431,37 +643,16 @@ function parseTeamAnalytics(raw: Record<string, unknown>): TeamAnalytics {
       opr: toNumber(tbaRaw.opr),
       rank: toNumber(tbaRaw.rank),
     },
-    robot: {
-      autoFuelApc: toNumber(
-        robotRaw.auto_fuel_apc ?? robotRaw.autoFuelApc,
-      ),
-      autoCycleCountAvg: toNumber(robotRaw.auto_cycle_count_avg),
-      autoTowerReliability: toNumber(robotRaw.auto_tower_reliability),
-      teleFuelApc: toNumber(
-        robotRaw.tele_fuel_apc ?? robotRaw.teleFuelApc,
-      ),
-      teleCycleCountAvg: toNumber(robotRaw.tele_cycle_count_avg),
-      teleTowerLevel: toString(robotRaw.tele_tower_level, 'none'),
-      teleTowerReliability: toNumber(robotRaw.tele_tower_reliability),
-      intakeDefenseCount: toNumber(robotRaw.intake_defense_count),
-      intakeDefenseEffectiveness: toNumber(
-        robotRaw.intake_defense_effectiveness,
-      ),
-      scoringDefenseCount: toNumber(robotRaw.scoring_defense_count),
-      scoringDefenseEffectiveness: toNumber(
-        robotRaw.scoring_defense_effectiveness,
-      ),
-      intakeDefenseScore,
-      scoringDefenseScore,
-      totalDefenseScore,
-      failureCount: toNumber(robotRaw.failure_count),
-      failureRecovery: toNumber(robotRaw.failure_recovery),
-    },
+    robot: parseTeamRobotOverview(robotRaw),
+    summary:
+      raw.summary && typeof raw.summary === 'object'
+        ? parseTeamSummary(raw.summary as Record<string, unknown>)
+        : null,
     humanPlayer: {
       fuelCountAvg: toNumber(humanRaw.fuel_count_avg),
       accuracy: toNumber(humanRaw.accuracy),
     },
-    scoutedMatches,
+    scoutedMatches: typeof scoutedRaw === 'number' ? scoutedRaw : undefined,
   };
 }
 
@@ -473,110 +664,117 @@ export async function fetchTeamAnalytics(
     `/analytics/event/${encodeURIComponent(eventKey)}`,
     token,
   );
+
   return data.map((item) => parseTeamAnalytics(item as Record<string, unknown>));
 }
 
-function parseMatchPhase(raw: Record<string, unknown> = {}) {
-  const cycles = (raw.cycles as Record<string, unknown>) ?? {};
-  const tower = (raw.tower as Record<string, unknown>) ?? {};
+function parseMatchCycleData(raw: Record<string, unknown> = {}): MatchCycleData {
   return {
-    cycles: {
-      cycleCount: toNumber(cycles.cycle_count),
-      cycleScoreAvg: toNumber(cycles.cycle_score_avg),
-      rateAvg: toNumber(cycles.rate_avg),
-      accuracyAvg: toNumber(cycles.accuracy_avg),
-    },
-    tower: {
-      attempted: Boolean(tower.attempted),
-      succeeded: Boolean(tower.succeeded),
-      level: toString(tower.level, 'none'),
-      climbSpeed: toString(tower.climb_speed, 'none'),
-      unclimbed: Boolean(tower.unclimbed),
-      unclimbSpeed: toString(tower.unclimb_speed, 'none'),
-    },
+    cycleCount: toNumber(raw.cycle_count),
+    cycleScoreAvg: toNumber(raw.cycle_score_avg),
+    rateAvg: toNumber(raw.rate_avg),
+    accuracyAvg: toNumber(raw.accuracy_avg),
+    fuelCountAvg: toNullableNumber(raw.fuel_count_avg),
   };
 }
 
-function parseMatchRobot(raw: Record<string, unknown>) {
-  const defense = (raw.defense as Record<string, unknown>) ?? {};
-  const intake = (defense.intake as Record<string, unknown>) ?? {};
-  const offense = (defense.offense as Record<string, unknown>) ?? {};
-  const failures = (raw.failures as Record<string, unknown>) ?? {};
-  const instances = (failures.instances as Record<string, unknown>) ?? {};
-  const passing = (raw.passing as Record<string, unknown>) ?? {};
-  const mobility = (raw.mobility as Record<string, unknown>) ?? {};
+function parseMatchTowerData(raw: Record<string, unknown> = {}): MatchTowerData {
+  return {
+    attempted: toBoolean(raw.attempted),
+    succeeded: toBoolean(raw.succeeded),
+    level: toString(raw.level, 'none'),
+    climbSpeed: toString(raw.climb_speed, 'none'),
+    unclimbed: toBoolean(raw.unclimbed),
+    unclimbSpeed: toString(raw.unclimb_speed, 'none'),
+  };
+}
 
+function parseMatchPhase(raw: Record<string, unknown> = {}): MatchPhaseData {
+  return {
+    cycles: parseMatchCycleData((raw.cycles as Record<string, unknown>) ?? {}),
+    tower: parseMatchTowerData((raw.tower as Record<string, unknown>) ?? {}),
+  };
+}
+
+function parseMatchDefenseSide(raw: Record<string, unknown> = {}): MatchDefenseSide {
+  return {
+    played: toBoolean(raw.played),
+    effectiveness: toString(raw.effectiveness, 'not_observed'),
+    effNum: toNumber(raw.eff_num),
+  };
+}
+
+function parseMatchDefenseData(raw: Record<string, unknown> = {}): MatchDefenseData {
+  return {
+    score: toNumber(raw.score),
+    calculatedScore: toNumber(raw.calculated_score ?? raw.calculatedScore),
+    unaware: toBoolean(raw.unaware),
+    penaltyProne: toBoolean(raw.penalty_prone ?? raw.penaltyProne),
+    reckless: toBoolean(raw.reckless),
+    shutDown: toBoolean(raw.shut_down ?? raw.shutDown),
+    eliteDriving: toBoolean(raw.elite_driving ?? raw.eliteDriving),
+    intake: parseMatchDefenseSide((raw.intake as Record<string, unknown>) ?? {}),
+    offense: parseMatchDefenseSide((raw.offense as Record<string, unknown>) ?? {}),
+  };
+}
+
+function parseFailureInstance(raw: Record<string, unknown> = {}) {
+  return {
+    count: toNumber(raw.count),
+    recoveredCount: toNumber(raw.recovered_count ?? raw.recoveredCount),
+    recoveredRate: toNumber(raw.recovered_rate ?? raw.recoveredRate),
+    recoveryTimeAvg: toNullableNumber(raw.recovery_time_avg ?? raw.recoveryTimeAvg),
+  };
+}
+
+function parseMatchFailureData(raw: Record<string, unknown> = {}): MatchFailureData {
+  const instances = (raw.instances as Record<string, unknown>) ?? {};
+
+  return {
+    count: toNumber(raw.count),
+    recoveredCount: toNumber(raw.recovered_count ?? raw.recoveredCount),
+    recoveredRate: toNumber(raw.recovered_rate ?? raw.recoveredRate),
+    disabled: parseFailureInstance(
+      (instances.disabled as Record<string, unknown>) ?? {},
+    ),
+    major: parseFailureInstance((instances.major as Record<string, unknown>) ?? {}),
+    minor: parseFailureInstance((instances.minor as Record<string, unknown>) ?? {}),
+  };
+}
+
+function parseMatchPassingData(raw: Record<string, unknown> = {}): MatchPassingData {
+  return {
+    opposingToNeutral: toString(raw.opposing_to_neutral, 'not_observed'),
+    neutralToAlliance: toString(raw.neutral_to_alliance, 'not_observed'),
+    opposingToAlliance: toString(raw.opposing_to_alliance, 'not_observed'),
+  };
+}
+
+function parseMatchMobilityData(raw: Record<string, unknown> = {}): MatchMobilityData {
+  return {
+    trench: toString(raw.trench, 'not_observed'),
+    bump: toString(raw.bump, 'not_observed'),
+  };
+}
+
+function parseMatchRobot(raw: Record<string, unknown>): MatchRobotData {
   return {
     auto: parseMatchPhase((raw.auto as Record<string, unknown>) ?? {}),
     tele: parseMatchPhase((raw.tele as Record<string, unknown>) ?? {}),
-    defense: {
-      intake: {
-        played: Boolean(intake.played),
-        effectiveness: toString(intake.effectiveness, 'not_observed'),
-        effNum: toNumber(intake.eff_num),
-      },
-      offense: {
-        played: Boolean(offense.played),
-        effectiveness: toString(offense.effectiveness, 'not_observed'),
-        effNum: toNumber(offense.eff_num),
-      },
-    },
-    failures: {
-      count: toNumber(failures.count),
-      recoveredCount: toNumber(failures.recovered_count),
-      recoveredRate: toNumber(failures.recovered_rate),
-      disabled: {
-        count: toNumber((instances.disabled as Record<string, unknown>)?.count),
-        recoveredCount: toNumber(
-          (instances.disabled as Record<string, unknown>)?.recovered_count,
-        ),
-        recoveredRate: toNumber(
-          (instances.disabled as Record<string, unknown>)?.recovered_rate,
-        ),
-        recoveryTimeAvg: toNumber(
-          (instances.disabled as Record<string, unknown>)?.recovery_time_avg,
-        ),
-      },
-      major: {
-        count: toNumber((instances.major as Record<string, unknown>)?.count),
-        recoveredCount: toNumber(
-          (instances.major as Record<string, unknown>)?.recovered_count,
-        ),
-        recoveredRate: toNumber(
-          (instances.major as Record<string, unknown>)?.recovered_rate,
-        ),
-        recoveryTimeAvg: toNumber(
-          (instances.major as Record<string, unknown>)?.recovery_time_avg,
-        ),
-      },
-      minor: {
-        count: toNumber((instances.minor as Record<string, unknown>)?.count),
-        recoveredCount: toNumber(
-          (instances.minor as Record<string, unknown>)?.recovered_count,
-        ),
-        recoveredRate: toNumber(
-          (instances.minor as Record<string, unknown>)?.recovered_rate,
-        ),
-        recoveryTimeAvg: toNumber(
-          (instances.minor as Record<string, unknown>)?.recovery_time_avg,
-        ),
-      },
-    },
-    passing: {
-      opposingToNeutral: toString(passing.opposing_to_neutral, 'none'),
-      neutralToAlliance: toString(passing.neutral_to_alliance, 'none'),
-      opposingToAlliance: toString(passing.opposing_to_alliance, 'none'),
-    },
-    mobility: {
-      trench: toString(mobility.trench, 'none'),
-      bump: toString(mobility.bump, 'none'),
-    },
-    notes: raw.notes ? toString(raw.notes) : null,
+    defense: parseMatchDefenseData((raw.defense as Record<string, unknown>) ?? {}),
+    failures: parseMatchFailureData((raw.failures as Record<string, unknown>) ?? {}),
+    passing: parseMatchPassingData((raw.passing as Record<string, unknown>) ?? {}),
+    mobility: parseMatchMobilityData((raw.mobility as Record<string, unknown>) ?? {}),
+    drivetrain: toOptionalString(raw.drivetrain),
+    autoPath: toOptionalString(raw.auto_path ?? raw.autoPath),
+    notes: toOptionalString(raw.notes),
+    defenseNotes: toOptionalString(raw.defense_notes ?? raw.defenseNotes),
   };
 }
 
 function parseTeamMatchAnalytics(raw: Record<string, unknown>): TeamMatchAnalytics {
   const robotRaw = raw.robot as Record<string, unknown> | undefined;
+
   return {
     eventKey: toString(raw.event_key ?? raw.eventKey),
     matchKey: toString(raw.match_key ?? raw.matchKey),
@@ -586,6 +784,24 @@ function parseTeamMatchAnalytics(raw: Record<string, unknown>): TeamMatchAnalyti
     setNumber: toNumber(raw.set_number),
     robot: robotRaw ? parseMatchRobot(robotRaw) : null,
     humanPlayer: (raw.human_player as Record<string, unknown>) ?? null,
+  };
+}
+
+export function parseTeamDetailResponse(data: Record<string, unknown>): TeamDetail {
+  const matchesRaw = Array.isArray(data.matches)
+    ? (data.matches as Record<string, unknown>[])
+    : [];
+  const overviewsRaw = Array.isArray(data.overviews)
+    ? (data.overviews as Record<string, unknown>[])
+    : [];
+
+  return {
+    teamKey: toString(data.team_key ?? data.teamKey),
+    eventKeys: Array.isArray(data.event_keys)
+      ? data.event_keys.filter((value): value is string => typeof value === 'string')
+      : [],
+    matches: matchesRaw.map((match) => parseTeamMatchAnalytics(match)),
+    overviews: overviewsRaw.map((overview) => parseTeamAnalytics(overview)),
   };
 }
 
@@ -601,19 +817,5 @@ export async function fetchTeamDetail(
     token,
   );
 
-  const matchesRaw = Array.isArray(data.matches)
-    ? (data.matches as Record<string, unknown>[])
-    : [];
-  const overviewsRaw = Array.isArray(data.overviews)
-    ? (data.overviews as Record<string, unknown>[])
-    : [];
-
-  return {
-    teamKey: toString(data.team_key ?? data.teamKey),
-    eventKeys: Array.isArray(data.event_keys)
-      ? (data.event_keys as string[])
-      : [],
-    matches: matchesRaw.map((match) => parseTeamMatchAnalytics(match)),
-    overviews: overviewsRaw.map((overview) => parseTeamAnalytics(overview)),
-  };
+  return parseTeamDetailResponse(data);
 }

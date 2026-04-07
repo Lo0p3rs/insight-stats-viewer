@@ -1,279 +1,259 @@
-'use client';
+"use client"
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState } from "react"
+
+import { Card, CardContent } from "@/components/ui/card"
 
 type TrendChartProps = {
-  values: number[];
-  labels: string[];
-  formatValue?: (value: number) => string;
-  detailValues?: Array<number | null>;
-  formatDetail?: (value: number) => string;
-  averageDetailValue?: number | null;
-};
+  values: number[]
+  labels: string[]
+  formatValue?: (value: number) => string
+}
 
 type Point = {
-  x: number;
-  y: number;
-  label: string;
-  value: number;
-  detailValue: number | null;
-};
+  x: number
+  y: number
+  label: string
+  value: number
+}
 
 function buildSmoothPath(points: Point[]) {
   if (points.length <= 1) {
-    return points.length === 1 ? `M ${points[0].x} ${points[0].y}` : '';
+    return points.length === 1 ? `M ${points[0].x} ${points[0].y}` : ""
   }
 
-  let path = `M ${points[0].x} ${points[0].y}`;
+  let path = `M ${points[0].x} ${points[0].y}`
 
   for (let index = 0; index < points.length - 1; index += 1) {
-    const current = points[index];
-    const next = points[index + 1];
-    const controlX = (current.x + next.x) / 2;
+    const current = points[index]
+    const next = points[index + 1]
+    const controlX = (current.x + next.x) / 2
 
-    path += ` C ${controlX} ${current.y}, ${controlX} ${next.y}, ${next.x} ${next.y}`;
+    path += ` C ${controlX} ${current.y}, ${controlX} ${next.y}, ${next.x} ${next.y}`
   }
 
-  return path;
+  return path
 }
 
 export default function TrendChart({
   values,
   labels,
   formatValue = (value) => value.toFixed(1),
-  detailValues = [],
-  formatDetail,
-  averageDetailValue = null,
 }: TrendChartProps) {
-  const gradientId = useId().replace(/:/g, '');
-  const width = 820;
-  const height = 320;
-  const padding = {
-    left: 56,
-    right: 22,
-    top: 28,
-    bottom: 44,
-  };
-  const [activeIndex, setActiveIndex] = useState(values.length - 1);
+  const gradientId = useId().replace(/:/g, "")
+  const width = 900
+  const height = 300
+  const padding = { left: 48, right: 16, top: 20, bottom: 34 }
+  const [activeIndex, setActiveIndex] = useState(values.length - 1)
 
   useEffect(() => {
-    setActiveIndex(values.length > 0 ? values.length - 1 : 0);
-  }, [values]);
+    setActiveIndex(values.length > 0 ? values.length - 1 : 0)
+  }, [values])
 
   if (!values.length) {
     return (
-      <div className="chart-empty">
-        <strong>No scouting trend data yet.</strong>
-        <span>Match-by-match data will appear here once reports are available.</span>
-      </div>
-    );
+      <Card className="border-dashed border-border/80 bg-muted/20">
+        <CardContent className="flex min-h-[260px] flex-col items-center justify-center gap-2 p-6 text-center">
+          <p className="text-sm font-medium">No trend data available yet.</p>
+          <p className="text-sm text-muted-foreground">
+            Match-by-match values will appear once more results are available.
+          </p>
+        </CardContent>
+      </Card>
+    )
   }
 
-  const minValue = 0;
-  const peakValue = Math.max(...values);
-  const maxValue = peakValue > 0 ? peakValue * 1.15 : 1;
-  const plotWidth = width - padding.left - padding.right;
-  const plotHeight = height - padding.top - padding.bottom;
-  const average =
-    values.reduce((sum, value) => sum + value, 0) / values.length;
+  const plotWidth = width - padding.left - padding.right
+  const plotHeight = height - padding.top - padding.bottom
+  const maxValue = Math.max(1, ...values) * 1.15
+  const averageValue = values.reduce((sum, value) => sum + value, 0) / values.length
 
   const points = values.map((value, index) => {
-    const x =
-      padding.left +
-      (index / Math.max(1, values.length - 1)) * plotWidth;
+    const x = padding.left + (index / Math.max(1, values.length - 1)) * plotWidth
     const y =
       height -
       padding.bottom -
-      ((value - minValue) / (maxValue - minValue || 1)) * plotHeight;
+      (value / Math.max(1, maxValue)) * plotHeight
 
     return {
       x,
       y,
       label: labels[index] ?? `M${index + 1}`,
       value,
-      detailValue: detailValues[index] ?? null,
-    };
-  });
+    }
+  })
 
-  const activePoint = points[Math.min(activeIndex, points.length - 1)];
-  const linePath = buildSmoothPath(points);
+  const linePath = buildSmoothPath(points)
   const areaPath = `${linePath} L ${points[points.length - 1].x} ${
     height - padding.bottom
-  } L ${points[0].x} ${height - padding.bottom} Z`;
+  } L ${points[0].x} ${height - padding.bottom} Z`
+  const activePoint = points[Math.min(activeIndex, points.length - 1)]
   const averageY =
     height -
     padding.bottom -
-    ((average - minValue) / (maxValue - minValue || 1)) * plotHeight;
+    (averageValue / Math.max(1, maxValue)) * plotHeight
 
   const yTicks = Array.from({ length: 5 }, (_, index) => {
-    const ratio = index / 4;
-    const value = maxValue - ratio * (maxValue - minValue);
-    const y = padding.top + ratio * plotHeight;
+    const ratio = index / 4
+    const tickValue = maxValue - ratio * maxValue
     return {
-      value,
-      y,
-    };
-  });
-
-  const labelIndexes = new Set([
-    0,
-    Math.floor((points.length - 1) / 2),
-    points.length - 1,
-  ]);
-  const showDetail = Boolean(formatDetail);
-  const detailFormatter = formatDetail ?? ((value: number) => value.toFixed(0));
-  const activeDetail =
-    showDetail && activePoint.detailValue !== null
-      ? detailFormatter(activePoint.detailValue)
-      : null;
-  const averageDetail =
-    showDetail && averageDetailValue !== null
-      ? detailFormatter(averageDetailValue)
-      : null;
-  const calloutHeight = activeDetail ? 64 : 48;
+      value: tickValue,
+      y: padding.top + ratio * plotHeight,
+    }
+  })
 
   return (
-    <div className="chart-shell">
-      <div className="chart-summary">
-        <div>
-          <span className="chart-summary-label">Selected match</span>
-          <strong>{activePoint.label}</strong>
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+          <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+            Selected match
+          </p>
+          <p className="mt-2 text-sm font-medium">{activePoint.label}</p>
         </div>
-        <div>
-          <span className="chart-summary-label">{showDetail ? 'Score' : 'Value'}</span>
-          <strong>{formatValue(activePoint.value)}</strong>
+        <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+          <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+            Value
+          </p>
+          <p className="mt-2 font-mono text-base font-semibold">
+            {formatValue(activePoint.value)}
+          </p>
         </div>
-        {showDetail ? (
-          <div>
-            <span className="chart-summary-label">Cycles</span>
-            <strong>{activeDetail ?? '-'}</strong>
-            {averageDetail ? <small>Avg {averageDetail}</small> : null}
-          </div>
-        ) : null}
-        <div>
-          <span className="chart-summary-label">{showDetail ? 'Avg score' : 'Average'}</span>
-          <strong>{formatValue(average)}</strong>
+        <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+          <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+            Average
+          </p>
+          <p className="mt-2 font-mono text-base font-semibold">
+            {formatValue(averageValue)}
+          </p>
         </div>
       </div>
 
-      <svg
-        className="chart"
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label="Performance trend chart"
-      >
-        <defs>
-          <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="rgba(255, 94, 0, 0.28)" />
-            <stop offset="100%" stopColor="rgba(255, 94, 0, 0.03)" />
-          </linearGradient>
-        </defs>
+      <div className="overflow-x-auto">
+        <svg
+          className="min-w-[760px]"
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label="Performance trend chart"
+        >
+          <defs>
+            <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="hsla(var(--primary), 0.28)" />
+              <stop offset="100%" stopColor="hsla(var(--primary), 0.02)" />
+            </linearGradient>
+          </defs>
 
-        {yTicks.map((tick) => (
-          <g key={tick.y}>
-            <line
-              className="chart-grid-line"
-              x1={padding.left}
-              x2={width - padding.right}
-              y1={tick.y}
-              y2={tick.y}
-            />
-            <text
-              className="chart-axis-label chart-axis-label-y"
-              x={padding.left - 10}
-              y={tick.y + 4}
-              textAnchor="end"
-            >
-              {formatValue(tick.value)}
-            </text>
-          </g>
-        ))}
+          {yTicks.map((tick) => (
+            <g key={tick.y}>
+              <line
+                x1={padding.left}
+                x2={width - padding.right}
+                y1={tick.y}
+                y2={tick.y}
+                stroke="hsl(var(--border))"
+                strokeWidth="1"
+              />
+              <text
+                x={padding.left - 10}
+                y={tick.y + 4}
+                textAnchor="end"
+                fill="hsl(var(--muted-foreground))"
+                fontSize="11"
+              >
+                {formatValue(tick.value)}
+              </text>
+            </g>
+          ))}
 
-        <line
-          className="chart-average-line"
-          x1={padding.left}
-          x2={width - padding.right}
-          y1={averageY}
-          y2={averageY}
-        />
+          <line
+            x1={padding.left}
+            x2={width - padding.right}
+            y1={averageY}
+            y2={averageY}
+            stroke="hsla(var(--primary), 0.45)"
+            strokeWidth="1.5"
+            strokeDasharray="5 5"
+          />
 
-        <path className="chart-area" d={areaPath} fill={`url(#${gradientId})`} />
-        <path className="chart-line" d={linePath} />
+          <path d={areaPath} fill={`url(#${gradientId})`} />
+          <path
+            d={linePath}
+            fill="none"
+            stroke="hsl(var(--primary))"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
 
-        {points.map((point, index) => {
-          const isActive = index === activeIndex;
-          return (
+          {points.map((point, index) => (
             <g key={`${point.label}-${point.value}`}>
               <circle
-                className={`chart-point ${isActive ? 'active' : ''}`}
                 cx={point.x}
                 cy={point.y}
-                r={isActive ? 7 : 5}
+                r={index === activeIndex ? 6 : 4.5}
+                fill="hsl(var(--primary))"
+                stroke="hsl(var(--background))"
+                strokeWidth="2"
                 onMouseEnter={() => setActiveIndex(index)}
                 onFocus={() => setActiveIndex(index)}
               />
-              {labelIndexes.has(index) ? (
+              {index === 0 || index === points.length - 1 || index === Math.floor(points.length / 2) ? (
                 <text
-                  className="chart-axis-label chart-axis-label-x"
                   x={point.x}
-                  y={height - 14}
+                  y={height - 10}
                   textAnchor={
                     index === 0
-                      ? 'start'
+                      ? "start"
                       : index === points.length - 1
-                        ? 'end'
-                        : 'middle'
+                        ? "end"
+                        : "middle"
                   }
+                  fill="hsl(var(--muted-foreground))"
+                  fontSize="11"
                 >
                   {point.label}
                 </text>
               ) : null}
             </g>
-          );
-        })}
+          ))}
 
-        <g className="chart-callout">
           <line
-            className="chart-callout-line"
             x1={activePoint.x}
             x2={activePoint.x}
             y1={padding.top}
             y2={height - padding.bottom}
+            stroke="hsl(var(--border))"
+            strokeDasharray="5 5"
           />
+
           <rect
-            className="chart-callout-card"
-            x={Math.min(width - 170, Math.max(padding.left, activePoint.x - 72))}
-            y={padding.top - 8}
-            rx={12}
-            ry={12}
-            width={144}
-            height={calloutHeight}
+            x={Math.min(width - 150, Math.max(padding.left, activePoint.x - 65))}
+            y={padding.top - 4}
+            width="132"
+            height="46"
+            rx="10"
+            fill="hsl(var(--card))"
+            stroke="hsl(var(--border))"
           />
           <text
-            className="chart-callout-match"
-            x={Math.min(width - 158, Math.max(padding.left + 12, activePoint.x - 60))}
-            y={padding.top + 10}
+            x={Math.min(width - 138, Math.max(padding.left + 12, activePoint.x - 53))}
+            y={padding.top + 13}
+            fill="hsl(var(--muted-foreground))"
+            fontSize="11"
           >
             {activePoint.label}
           </text>
           <text
-            className="chart-callout-value"
-            x={Math.min(width - 158, Math.max(padding.left + 12, activePoint.x - 60))}
-            y={padding.top + 30}
+            x={Math.min(width - 138, Math.max(padding.left + 12, activePoint.x - 53))}
+            y={padding.top + 31}
+            fill="hsl(var(--foreground))"
+            fontSize="14"
+            fontWeight="600"
           >
             {formatValue(activePoint.value)}
           </text>
-          {activeDetail ? (
-            <text
-              className="chart-callout-detail"
-              x={Math.min(width - 158, Math.max(padding.left + 12, activePoint.x - 60))}
-              y={padding.top + 46}
-            >
-              {activeDetail}
-            </text>
-          ) : null}
-        </g>
-      </svg>
+        </svg>
+      </div>
     </div>
-  );
+  )
 }

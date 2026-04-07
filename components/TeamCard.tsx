@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { calculateTeamCardMetrics } from '@/lib/analysis';
-import { formatPercent } from '@/lib/format';
 import { teamAvatarUrl, teamNumberFromKey } from '@/lib/team-utils';
 import type { TeamAnalytics } from '@/lib/types';
 
@@ -97,8 +96,8 @@ export default function TeamCard({ team, allTeams }: TeamCardProps) {
       </div>
 
       <div className="team-card-footer">
-        <span>Human accuracy {formatPercent(team.humanPlayer.accuracy)}</span>
-        <span>{team.scoutedMatches ?? 0} scouted matches</span>
+        <span>Defense {team.robot.totalDefenseScore.toFixed(1)}</span>
+        <span>{team.scoutedMatches ?? 0} matches tracked</span>
       </div>
     </Link>
   );

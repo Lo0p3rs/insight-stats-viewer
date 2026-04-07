@@ -1,743 +1,810 @@
-'use client';
+"use client"
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import RetryError from '@/components/RetryError';
-import TrendChart from '@/components/TrendChart';
+import Link from "next/link"
+import { useParams } from "next/navigation"
+import { ChevronLeft, ChevronRight } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+
+import RetryError from "@/components/RetryError"
+import TrendChart from "@/components/TrendChart"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
-  fetchTbaEventTeams,
-  fetchTeamAnalytics,
-  fetchTeamDetail,
-} from '@/lib/api';
-import { getToken } from '@/lib/auth';
-import { useEventContext } from '@/lib/event-context';
-import { formatPercent } from '@/lib/format';
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { fetchEventTeams, fetchScouts, fetchTeamAnalytics, fetchTeamDetail } from "@/lib/api"
+import { getToken } from "@/lib/auth"
+import { useEventContext } from "@/lib/event-context"
+import { formatPercent } from "@/lib/format"
+import {
+  average,
+  computeTeamRanks,
+  formatMatchLabel,
+  formatRank,
+  getAutoPathRows,
+  getCombinedAccuracy,
+  getCombinedApc,
+  getCombinedCycles,
+  getMostUsedAutoPath,
+  getSummaryEvidenceCount,
+  getSummaryHeadline,
+  getSummaryStatusLabel,
+  getTrendMatches,
+  hasSummaryContent,
+  trend,
+  trendMetricOptions,
+  trendRangeOptions,
+  type RankMetricKey,
+  type TrendMetricKey,
+  type TrendRangeKey,
+} from "@/lib/team-metrics"
 import {
   resolveTeamDisplayName,
   teamAvatarUrl,
   teamNumberFromKey,
-} from '@/lib/team-utils';
-import type {
-  TbaTeamSimple,
-  TeamAnalytics,
-  TeamDetail,
-  TeamMatchAnalytics,
-} from '@/lib/types';
+} from "@/lib/team-utils"
+import type { EventTeam, Scout, TeamAnalytics, TeamDetail } from "@/lib/types"
 
-type Metric = {
-  id: string;
-  label: string;
-  extract: (match: TeamMatchAnalytics) => number | null;
-  format: (value: number) => string;
-  detailValue?: (match: TeamMatchAnalytics) => number | null;
-  detailFormat?: (value: number) => string;
-};
-
-type RankDefinition = {
-  key: string;
-  extractor: (team: TeamAnalytics) => number;
-  ascending?: boolean;
-};
-
-type StatCard = {
-  label: string;
-  value: string;
-  subtitle: string;
-  rankKey?: string;
-};
-
-type StatSection = {
-  label: string;
-  items: StatCard[];
-};
-
-const metrics: Metric[] = [
-  {
-    id: 'autoScore',
-    label: 'Auto Score',
-    extract: (match) => (match.robot ? getPhaseMatchScore(match.robot.auto) : null),
-    format: (value) => value.toFixed(1),
-    detailValue: (match) => match.robot?.auto.cycles.cycleCount ?? null,
-    detailFormat: (value) => `${value.toFixed(0)} cycles`,
-  },
-  {
-    id: 'teleScore',
-    label: 'Tele Score',
-    extract: (match) => (match.robot ? getPhaseMatchScore(match.robot.tele) : null),
-    format: (value) => value.toFixed(1),
-    detailValue: (match) => match.robot?.tele.cycles.cycleCount ?? null,
-    detailFormat: (value) => `${value.toFixed(0)} cycles`,
-  },
-  {
-    id: 'defenseScore',
-    label: 'Defense Score',
-    extract: (match) =>
-      match.robot
-        ? match.robot.defense.intake.effNum + match.robot.defense.offense.effNum
-        : null,
-    format: (value) => value.toFixed(1),
-  },
-  {
-    id: 'failures',
-    label: 'Failure Count',
-    extract: (match) => match.robot?.failures.count ?? null,
-    format: (value) => value.toFixed(0),
-  },
-  {
-    id: 'failureRecovery',
-    label: 'Failure Recovery',
-    extract: (match) => match.robot?.failures.recoveredRate ?? null,
-    format: (value) => formatPercent(value),
-  },
-];
-
-const rankDefinitions: RankDefinition[] = [
-  { key: 'autoFuelApc', extractor: (team) => team.robot.autoFuelApc },
-  { key: 'autoCycleCountAvg', extractor: (team) => team.robot.autoCycleCountAvg },
-  {
-    key: 'autoTowerReliability',
-    extractor: (team) => team.robot.autoTowerReliability,
-  },
-  { key: 'teleFuelApc', extractor: (team) => team.robot.teleFuelApc },
-  { key: 'teleCycleCountAvg', extractor: (team) => team.robot.teleCycleCountAvg },
-  {
-    key: 'teleTowerReliability',
-    extractor: (team) => team.robot.teleTowerReliability,
-  },
-  {
-    key: 'intakeDefenseScore',
-    extractor: (team) => team.robot.intakeDefenseScore,
-  },
-  {
-    key: 'scoringDefenseScore',
-    extractor: (team) => team.robot.scoringDefenseScore,
-  },
-  { key: 'totalDefenseScore', extractor: (team) => team.robot.totalDefenseScore },
-  {
-    key: 'failureCount',
-    extractor: (team) => team.robot.failureCount,
-    ascending: true,
-  },
-  {
-    key: 'failureRecovery',
-    extractor: (team) => team.robot.failureRecovery,
-  },
-  {
-    key: 'fuelCountAvg',
-    extractor: (team) => team.humanPlayer.fuelCountAvg,
-  },
-];
-
-function computeRanks(teams: TeamAnalytics[], teamKey: string) {
-  const ranks: Record<string, number> = {};
-
-  rankDefinitions.forEach((definition) => {
-    const sorted = [...teams].sort((left, right) => {
-      const leftValue = definition.extractor(left);
-      const rightValue = definition.extractor(right);
-      return definition.ascending
-        ? leftValue - rightValue
-        : rightValue - leftValue;
-    });
-
-    const index = sorted.findIndex((team) => team.teamKey === teamKey);
-    if (index !== -1) {
-      ranks[definition.key] = index + 1;
-    }
-  });
-
-  return ranks;
+type StatItem = {
+  label: string
+  value: string
+  note: string
+  rankKey?: RankMetricKey
 }
 
-function getRankTone(rank: number, total: number) {
-  if (total <= 0) return 'neutral';
-  const percentile = 1 - (rank - 1) / total;
-  if (percentile >= 0.8) return 'top';
-  if (percentile >= 0.5) return 'mid';
-  return 'low';
+type StatPage = {
+  label: string
+  items: StatItem[]
 }
 
-function getPhaseMatchScore(
-  phase: {
-    cycles: {
-      cycleScoreAvg: number;
-      cycleCount: number;
-    };
-  },
-) {
-  return phase.cycles.cycleScoreAvg * phase.cycles.cycleCount;
+function formatGeneratedAt(value: string | null) {
+  if (!value) return "Unknown"
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed)
+}
+
+function formatNoteDate(value: string) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return new Intl.DateTimeFormat("en-US", {
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Los_Angeles",
+    timeZoneName: "short",
+  }).format(parsed)
+}
+
+function titleCase(value: string) {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ")
+}
+
+function buildScoutNameMap(scouts: Scout[]) {
+  return Object.fromEntries(scouts.map((scout) => [scout.id, scout.name]))
+}
+
+function buildStatPages(team: TeamAnalytics): StatPage[] {
+  return [
+    {
+      label: "Auto",
+      items: [
+        { label: "APC", value: team.robot.autoFuelApc.toFixed(1), note: "estimated point contribution", rankKey: "autoFuelApc" },
+        { label: "Avg fuel/cycle", value: (team.robot.autoCycleFuelCountAvg ?? 0).toFixed(1), note: "average per auto cycle", rankKey: "autoCycleFuelCountAvg" },
+        { label: "Cycle count", value: team.robot.autoCycleCountAvg.toFixed(1), note: "average auto cycles", rankKey: "autoCycleCountAvg" },
+        { label: "Accuracy", value: formatPercent(team.robot.autoCycleAccuracy), note: "success rate", rankKey: "autoCycleAccuracy" },
+        { label: "Tower", value: formatPercent(team.robot.autoTowerReliability), note: "tower success rate", rankKey: "autoTowerReliability" },
+      ],
+    },
+    {
+      label: "Teleop",
+      items: [
+        { label: "APC", value: team.robot.teleFuelApc.toFixed(1), note: "estimated point contribution", rankKey: "teleFuelApc" },
+        { label: "Avg fuel/cycle", value: (team.robot.teleCycleFuelCountAvg ?? 0).toFixed(1), note: "average per teleop cycle", rankKey: "teleCycleFuelCountAvg" },
+        { label: "Cycle count", value: team.robot.teleCycleCountAvg.toFixed(1), note: "average tele cycles", rankKey: "teleCycleCountAvg" },
+        { label: "Accuracy", value: formatPercent(team.robot.teleCycleAccuracy), note: "success rate", rankKey: "teleCycleAccuracy" },
+        { label: "Tower level", value: team.robot.teleTowerLevel.toUpperCase(), note: `${formatPercent(team.robot.teleTowerReliability)} success rate` },
+      ],
+    },
+    {
+      label: "Defense & Reliability",
+      items: [
+        { label: "Defense score", value: team.robot.defenseScore.toFixed(1), note: "overall defensive impact", rankKey: "defenseScore" },
+        { label: "Team notes", value: `${team.robot.scoutNotes.length}`, note: "notes available", rankKey: undefined },
+        { label: "Failures", value: team.robot.failureCount.toFixed(0), note: "lower is better", rankKey: "failureCount" },
+        { label: "Recovery", value: formatPercent(team.robot.failureRecovery), note: "recovered after issues", rankKey: "failureRecovery" },
+        { label: "Drivetrain", value: team.robot.drivetrain ? titleCase(team.robot.drivetrain) : "Unknown", note: "most common setup" },
+      ],
+    },
+  ]
 }
 
 export default function TeamDetailPage() {
-  const params = useParams();
-  const teamKey = Array.isArray(params.teamKey)
-    ? params.teamKey[0]
-    : params.teamKey;
-  const {
-    selectedEventKey,
-    eventVersion,
-    loading: eventLoading,
-  } = useEventContext();
-  const [detail, setDetail] = useState<TeamDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<unknown | null>(null);
-  const [reloadNonce, setReloadNonce] = useState(0);
-  const [metricId, setMetricId] = useState(metrics[0].id);
-  const [teamRanks, setTeamRanks] = useState<Record<string, number>>({});
-  const [teamCount, setTeamCount] = useState(0);
-  const [teamSummary, setTeamSummary] = useState<TeamAnalytics | null>(null);
-  const [tbaTeams, setTbaTeams] = useState<TbaTeamSimple[]>([]);
-  const [sectionIndex, setSectionIndex] = useState(0);
+  const params = useParams()
+  const teamKey = Array.isArray(params.teamKey) ? params.teamKey[0] : params.teamKey
+  const { selectedEvent, selectedEventKey, eventVersion, loading: eventLoading } = useEventContext()
+  const [detail, setDetail] = useState<TeamDetail | null>(null)
+  const [eventTeams, setEventTeams] = useState<EventTeam[]>([])
+  const [allTeams, setAllTeams] = useState<TeamAnalytics[]>([])
+  const [scouts, setScouts] = useState<Scout[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<unknown | null>(null)
+  const [reloadNonce, setReloadNonce] = useState(0)
+  const [statPageIndex, setStatPageIndex] = useState(0)
+  const [trendMetric, setTrendMetric] = useState<TrendMetricKey>("autoFuelTotal")
+  const [trendRange, setTrendRange] = useState<TrendRangeKey>("all")
 
   useEffect(() => {
-    if (eventLoading) {
-      return;
-    }
-
-    const token = getToken();
+    if (eventLoading) return
+    const token = getToken()
     if (!teamKey || !selectedEventKey || !token) {
-      setDetail(null);
-      setLoading(false);
-      return;
+      setDetail(null)
+      setLoading(false)
+      return
     }
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
+    let cancelled = false
+    setLoading(true)
+    setError(null)
     fetchTeamDetail(token, teamKey, selectedEventKey)
-      .then((data) => {
-        if (!cancelled) {
-          setDetail(data);
-        }
+      .then((teamDetail) => {
+        if (!cancelled) setDetail(teamDetail)
       })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err);
-        }
+      .catch((requestError) => {
+        if (!cancelled) setError(requestError)
       })
       .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
-
+        if (!cancelled) setLoading(false)
+      })
     return () => {
-      cancelled = true;
-    };
-  }, [eventLoading, eventVersion, reloadNonce, selectedEventKey, teamKey]);
+      cancelled = true
+    }
+  }, [eventLoading, eventVersion, reloadNonce, selectedEventKey, teamKey])
 
   useEffect(() => {
-    if (eventLoading) {
-      return;
-    }
-
-    const token = getToken();
+    if (eventLoading) return
+    const token = getToken()
     if (!teamKey || !selectedEventKey || !token) {
-      setTeamRanks({});
-      setTeamCount(0);
-      setTeamSummary(null);
-      setTbaTeams([]);
-      return;
+      setEventTeams([])
+      setAllTeams([])
+      setScouts([])
+      return
     }
-
-    let cancelled = false;
-
-    Promise.all([
+    let cancelled = false
+    Promise.allSettled([
+      fetchEventTeams(token, selectedEventKey),
       fetchTeamAnalytics(token, selectedEventKey),
-      fetchTbaEventTeams(selectedEventKey),
-    ])
-      .then(([data, tbaTeamData]) => {
-        if (!cancelled) {
-          setTeamCount(data.length);
-          setTeamRanks(computeRanks(data, teamKey));
-          setTeamSummary(data.find((team) => team.teamKey === teamKey) ?? null);
-          setTbaTeams(tbaTeamData);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setTeamCount(0);
-          setTeamRanks({});
-          setTeamSummary(null);
-          setTbaTeams([]);
-        }
-      });
-
+      fetchScouts(token),
+    ]).then(([eventTeamsResult, analyticsResult, scoutsResult]) => {
+      if (cancelled) return
+      setEventTeams(eventTeamsResult.status === "fulfilled" ? eventTeamsResult.value : [])
+      setAllTeams(analyticsResult.status === "fulfilled" ? analyticsResult.value : [])
+      setScouts(scoutsResult.status === "fulfilled" ? scoutsResult.value : [])
+    })
     return () => {
-      cancelled = true;
-    };
-  }, [eventLoading, reloadNonce, selectedEventKey, teamKey]);
-
-  const overview = detail
-    ? detail.overviews.find((entry) => entry.eventKey === selectedEventKey) ??
-      detail.overviews[0] ??
-      null
-    : null;
-
-  const matches = detail
-    ? [...detail.matches]
-        .filter((match) => match.level === 'qm')
-        .sort((left, right) => left.matchSort - right.matchSort)
-    : [];
-
-  const scoutedMatches = matches.filter((match) => match.robot).length;
-
-  const selectedMetric =
-    metrics.find((metric) => metric.id === metricId) ?? metrics[0];
-
-  const chartPoints = matches
-    .map((match) => ({
-      label: `QM ${match.matchNumber}`,
-      value: selectedMetric.extract(match),
-      detailValue: selectedMetric.detailValue?.(match) ?? null,
-    }))
-    .filter(
-      (
-        point,
-      ): point is {
-        label: string;
-        value: number;
-        detailValue: number | null;
-      } => point.value !== null && !Number.isNaN(point.value),
-    );
-
-  const values = chartPoints.map((point) => point.value);
-  const labels = chartPoints.map((point) => point.label);
-  const detailValues = chartPoints.map((point) => point.detailValue);
-
-  const average =
-    values.length > 0
-      ? values.reduce((sum, value) => sum + value, 0) / values.length
-      : 0;
-  const averageDetail =
-    detailValues.filter((value): value is number => value !== null).length > 0
-      ? detailValues
-          .filter((value): value is number => value !== null)
-          .reduce((sum, value) => sum + value, 0) /
-        detailValues.filter((value): value is number => value !== null).length
-      : null;
-  const best =
-    values.length > 0 ? Math.max(...values) : 0;
-  const trend = (() => {
-    if (values.length < 2) {
-      return 0;
+      cancelled = true
     }
+  }, [eventLoading, reloadNonce, selectedEventKey, teamKey])
 
-    const midpoint = Math.max(1, Math.floor(values.length / 2));
-    const firstHalf = values.slice(0, midpoint);
-    const secondHalf = values.slice(midpoint);
-    const firstAverage =
-      firstHalf.reduce((sum, value) => sum + value, 0) / firstHalf.length;
-    const secondAverage =
-      secondHalf.reduce((sum, value) => sum + value, 0) /
-      Math.max(1, secondHalf.length);
+  const overview = useMemo(() => {
+    if (!detail) return null
+    return detail.overviews.find((entry) => entry.eventKey === selectedEventKey) ?? detail.overviews[0] ?? null
+  }, [detail, selectedEventKey])
 
-    return ((secondAverage - firstAverage) / Math.max(1, Math.abs(firstAverage))) * 100;
-  })();
-  const displayedMatches = [...matches].reverse();
-  const pageLoading = eventLoading || loading;
-  const tbaFallbackName =
-    tbaTeams.find((team) => team.key === teamKey)?.nickname ??
-    tbaTeams.find((team) => team.key === teamKey)?.name ??
-    '';
+  const qualificationMatches = useMemo(() => {
+    if (!detail) return []
+    return [...detail.matches].filter((match) => match.level === "qm").sort((left, right) => left.matchSort - right.matchSort)
+  }, [detail])
+
+  const scoutedMatches = qualificationMatches.filter((match) => match.robot)
+  const statPages = overview ? buildStatPages(overview) : []
+  const teamRanks = teamKey ? computeTeamRanks(allTeams, teamKey) : {}
+  const scoutNames = buildScoutNameMap(scouts)
+
+  useEffect(() => {
+    setStatPageIndex(0)
+  }, [teamKey, selectedEventKey])
+
+  useEffect(() => {
+    if (statPages.length === 0) {
+      setStatPageIndex(0)
+      return
+    }
+    setStatPageIndex((currentIndex) => Math.min(currentIndex, statPages.length - 1))
+  }, [statPages.length])
+
+  const trendMetricOption = trendMetricOptions.find((option) => option.key === trendMetric) ?? trendMetricOptions[0]
+  const trendMatches = getTrendMatches(scoutedMatches, trendRange)
+  const trendSeries = trendMatches
+    .map((match) => ({ label: formatMatchLabel(match.matchKey, match.matchNumber), value: trendMetricOption.value(match) }))
+    .filter((entry): entry is { label: string; value: number } => entry.value !== null && Number.isFinite(entry.value))
+  const trendValues = trendSeries.map((entry) => entry.value)
+  const trendLabels = trendSeries.map((entry) => entry.label)
+  const trendAverage = average(trendValues)
+  const trendDelta = trend(trendValues)
+  const trendBest = trendValues.length > 0 ? Math.max(...trendValues) : 0
+
+  const pageLoading = eventLoading || loading
+  const fallbackName = eventTeams.find((team) => team.teamKey === teamKey)?.name ?? ""
   const displayName = resolveTeamDisplayName({
-    analyticsName: teamSummary?.name || overview?.name || '',
+    analyticsName: overview?.name ?? "",
     detail,
     eventKey: selectedEventKey,
-    fallbackName: tbaFallbackName,
-  });
+    fallbackName,
+  })
 
-  const statSections: StatSection[] = overview
-    ? [
-        {
-          label: 'Auto',
-          items: [
-            {
-              label: 'APC',
-              value: overview.robot.autoFuelApc.toFixed(1),
-              subtitle: 'auto fuel per cycle',
-              rankKey: 'autoFuelApc',
-            },
-            {
-              label: 'Cycles',
-              value: overview.robot.autoCycleCountAvg.toFixed(1),
-              subtitle: 'average cycles',
-              rankKey: 'autoCycleCountAvg',
-            },
-            {
-              label: 'Tower',
-              value: formatPercent(overview.robot.autoTowerReliability),
-              subtitle: 'tower reliability',
-              rankKey: 'autoTowerReliability',
-            },
-          ],
-        },
-        {
-          label: 'Teleop',
-          items: [
-            {
-              label: 'APC',
-              value: overview.robot.teleFuelApc.toFixed(1),
-              subtitle: 'tele fuel per cycle',
-              rankKey: 'teleFuelApc',
-            },
-            {
-              label: 'Cycles',
-              value: overview.robot.teleCycleCountAvg.toFixed(1),
-              subtitle: 'average cycles',
-              rankKey: 'teleCycleCountAvg',
-            },
-            {
-              label: 'Tower',
-              value: overview.robot.teleTowerLevel,
-              subtitle: `${formatPercent(overview.robot.teleTowerReliability)} reliability`,
-              rankKey: 'teleTowerReliability',
-            },
-          ],
-        },
-        {
-          label: 'Defense',
-          items: [
-            {
-              label: 'Intake Defense',
-              value: overview.robot.intakeDefenseScore.toFixed(1),
-              subtitle: `${overview.robot.intakeDefenseCount.toFixed(0)} actions`,
-              rankKey: 'intakeDefenseScore',
-            },
-            {
-              label: 'Scoring Defense',
-              value: overview.robot.scoringDefenseScore.toFixed(1),
-              subtitle: `${overview.robot.scoringDefenseCount.toFixed(0)} actions`,
-              rankKey: 'scoringDefenseScore',
-            },
-            {
-              label: 'Total Defense',
-              value: overview.robot.totalDefenseScore.toFixed(1),
-              subtitle: 'overall pressure',
-              rankKey: 'totalDefenseScore',
-            },
-          ],
-        },
-        {
-          label: 'Reliability',
-          items: [
-            {
-              label: 'Failure Count',
-              value: overview.robot.failureCount.toFixed(0),
-              subtitle: 'lower is better',
-              rankKey: 'failureCount',
-            },
-            {
-              label: 'Failure Recovery',
-              value: formatPercent(overview.robot.failureRecovery),
-              subtitle: 'recovery rate',
-              rankKey: 'failureRecovery',
-            },
-            {
-              label: 'Fuel Count',
-              value: overview.humanPlayer.fuelCountAvg.toFixed(1),
-              subtitle: 'fuel count average',
-              rankKey: 'fuelCountAvg',
-            },
-          ],
-        },
-      ]
-    : [];
+  if (!pageLoading && !selectedEventKey) {
+    return (
+      <Card className="border-dashed border-border/80 bg-muted/20">
+        <CardContent className="p-6">
+          <p className="font-medium">No event selected.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Choose an event from the top bar before opening a team page.</p>
+        </CardContent>
+      </Card>
+    )
+  }
 
-  useEffect(() => {
-    if (statSections.length === 0) {
-      setSectionIndex(0);
-      return;
-    }
+  if (pageLoading) {
+    return (
+      <Card className="border-border/70 bg-card/90">
+        <CardContent className="p-6 text-sm text-muted-foreground">Loading team profile...</CardContent>
+      </Card>
+    )
+  }
 
-    setSectionIndex((current) => Math.min(current, statSections.length - 1));
-  }, [statSections.length]);
+  if (error) {
+    return <RetryError error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
+  }
 
-  const activeSection = statSections[sectionIndex] ?? null;
-  const cycleSection = (direction: number) => {
-    if (statSections.length === 0) {
-      return;
-    }
+  if (!detail || !overview) {
+    return (
+      <Card className="border-dashed border-border/80 bg-muted/20">
+        <CardContent className="p-6">
+          <p className="font-medium">Team data unavailable.</p>
+        </CardContent>
+      </Card>
+    )
+  }
 
-    setSectionIndex((current) => {
-      const next = current + direction;
-      if (next < 0) {
-        return statSections.length - 1;
-      }
-      if (next >= statSections.length) {
-        return 0;
-      }
-      return next;
-    });
-  };
+  const summary = overview.summary
+  const summaryHeadline = getSummaryHeadline(summary)
+  const summaryText = summary?.summaryText?.trim() ?? ""
+  const showSummaryText = summaryText.length > 0 && summaryText !== summaryHeadline.trim()
+  const activeStatPage = statPages[statPageIndex] ?? statPages[0]!
+  const mostUsedAutoPath = getMostUsedAutoPath(overview)
+  const autoPathRows = getAutoPathRows(overview)
+  const noteList = [...overview.robot.scoutNotes].sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  const teamNumber = teamNumberFromKey(detail.teamKey)
+  const overviewStats = [
+    {
+      label: "Record",
+      value: `${overview.tba.wins}-${overview.tba.losses}-${overview.tba.ties}`,
+      note: "wins-losses-ties",
+    },
+    {
+      label: "Total APC",
+      value: getCombinedApc(overview).toFixed(1),
+      note: "auto + tele",
+    },
+    {
+      label: "Avg cycles",
+      value: getCombinedCycles(overview).toFixed(1),
+      note: "per match",
+    },
+    {
+      label: "Avg accuracy",
+      value: formatPercent(getCombinedAccuracy(overview)),
+      note: "weighted",
+    },
+    {
+      label: "Defense",
+      value: overview.robot.defenseScore.toFixed(1),
+      note: "overall score",
+    },
+    {
+      label: "Matches tracked",
+      value: `${scoutedMatches.length}/${qualificationMatches.length}`,
+      note: "matches available",
+    },
+  ]
+  const summaryGroups = [
+    { label: "Strengths", items: summary?.notes.strengths ?? [] },
+    { label: "Watch for", items: summary?.notes.concerns ?? [] },
+    { label: "Best role", items: summary?.notes.allianceFit ?? [] },
+    { label: "Additional notes", items: summary?.notes.isolatedNotes ?? [] },
+  ]
+  const defenseRows = [
+    {
+      label: "Unaware",
+      score: "-",
+      quantity: overview.robot.defenseUnawareCount,
+    },
+    {
+      label: "Penalty prone",
+      score: "-",
+      quantity: overview.robot.defensePenaltyProneCount,
+    },
+    {
+      label: "Reckless",
+      score: "-",
+      quantity: overview.robot.defenseRecklessCount,
+    },
+    {
+      label: "Shut down",
+      score: "-",
+      quantity: overview.robot.defenseShutDownCount,
+    },
+    {
+      label: "Elite driving",
+      score: "-",
+      quantity: overview.robot.defenseEliteDrivingCount,
+    },
+  ]
 
   return (
-    <div className="page">
-      {!pageLoading && !selectedEventKey ? (
-        <div className="surface-card empty-state">
-          <strong>Select an event.</strong>
-        </div>
-      ) : null}
+    <div className="space-y-5">
+      <Card className="border-border/70 bg-card/90">
+        <CardHeader className="gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 gap-4">
+            <Button asChild variant="outline" size="icon" className="mt-0.5 h-8 w-8 rounded-lg">
+              <Link href="/overview" aria-label="Back to overview">
+                <ChevronLeft className="h-4 w-4" />
+              </Link>
+            </Button>
 
-      {pageLoading ? <div className="loading">Loading...</div> : null}
-      {!pageLoading && error ? (
-        <RetryError
-          error={error}
-          onRetry={() => setReloadNonce((value) => value + 1)}
-        />
-      ) : null}
+            <img
+              className="h-14 w-14 rounded-xl border border-border/80 bg-muted/20 object-cover"
+              src={teamAvatarUrl(detail.teamKey)}
+              alt=""
+              loading="lazy"
+            />
 
-      {!pageLoading && detail && overview ? (
-        <>
-          <section className="hero-panel team-hero animate-in">
-            <div className="team-identity">
-              <img
-                className="team-avatar team-avatar-xl"
-                src={teamAvatarUrl(overview.teamKey)}
-                alt=""
-              />
-              <div className="team-identity-copy">
-                <span className="hero-kicker">Team</span>
-                <h1>Team {teamNumberFromKey(overview.teamKey)}</h1>
-                {displayName ? (
-                  <div className="team-name-line">{displayName}</div>
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="font-mono tracking-[0.14em]">
+                  Team Profile
+                </Badge>
+                <Badge variant="outline">{overview.tba.rank > 0 ? `Rank #${overview.tba.rank}` : "Unranked"}</Badge>
+              </div>
+              <div>
+                <CardTitle className="text-2xl tracking-tight">Team {teamNumber}</CardTitle>
+                <CardDescription className="mt-1">
+                  {displayName || `Team ${teamNumber}`}
+                  {selectedEvent ? ` • ${selectedEvent.name}` : ""}
+                </CardDescription>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {overviewStats.map((item) => (
+              <div key={item.label} className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {item.label}
+                </p>
+                <p className="mt-2 font-mono text-lg font-semibold">{item.value}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{item.note}</p>
+              </div>
+            ))}
+          </div>
+        </CardHeader>
+      </Card>
+
+      <div className="grid gap-5 xl:grid-cols-[1.35fr_0.95fr]">
+        <Card className="border-border/70 bg-card/90">
+          <CardHeader className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">Summary</Badge>
+              <Badge variant="outline">{getSummaryStatusLabel(summary)}</Badge>
+              <Badge variant="outline">{summary?.evidence.matchCount ?? 0} matches</Badge>
+              <Badge variant="outline">{summary?.evidence.robotReportCount ?? 0} match details</Badge>
+              <Badge variant="outline">{getSummaryEvidenceCount(summary)} notes</Badge>
+            </div>
+            <div>
+              <CardTitle className="text-lg">{summaryHeadline}</CardTitle>
+              <CardDescription className="mt-1">
+                Updated {formatGeneratedAt(summary?.generatedAt ?? null)}
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {hasSummaryContent(summary) ? (
+              <>
+                {showSummaryText ? (
+                  <div className="rounded-lg border border-border/80 bg-muted/20 p-4 text-sm leading-6 text-foreground/90">
+                    {summaryText}
+                  </div>
                 ) : null}
-                <div className="team-identity-actions">
-                  <Link href="/overview" className="btn btn-ghost team-back-link">
-                    Back
-                  </Link>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  {summaryGroups.map((group) => (
+                    <div key={group.label} className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                      <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                        {group.label}
+                      </p>
+                      {group.items.length > 0 ? (
+                        <div className="mt-2 space-y-2">
+                          {group.items.map((item, index) => (
+                            <p key={`${group.label}-${index}`} className="text-sm leading-5 text-foreground/90">
+                              {item}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-sm text-muted-foreground">No highlights available.</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
-                <div className="hero-tag-row">
-                  <span className="hero-tag">Rank #{overview.tba.rank}</span>
-                  <span className="hero-tag">{matches.length} played</span>
-                  <span className="hero-tag">
-                    {scoutedMatches}/{matches.length} scouted
-                  </span>
-                </div>
+
+                {summary && summary.defense.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                      Defensive style
+                    </div>
+                    <div className="space-y-3">
+                      {summary.defense.map((item, index) => (
+                        <div key={`${item.strategy}-${index}`} className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-medium">{titleCase(item.strategy)}</p>
+                            <Badge variant="outline">{titleCase(item.confidence)}</Badge>
+                            <Badge variant="outline">{titleCase(item.defenseEffectiveness)}</Badge>
+                            <Badge variant="outline">Driving {titleCase(item.driverQuality)}</Badge>
+                            <Badge variant="outline">Penalty risk {titleCase(item.foulRisk)}</Badge>
+                          </div>
+                          <p className="mt-2 text-sm leading-5 text-foreground/90">{item.description}</p>
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            {titleCase(item.whenUsed.matchPhase)}
+                            {item.whenUsed.situation ? ` • ${item.whenUsed.situation}` : ""}
+                            {item.supportingMatches.length > 0
+                              ? ` • ${item.supportingMatches.map((matchKey) => formatMatchLabel(matchKey)).join(", ")}`
+                              : ""}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border/80 bg-muted/10 p-6 text-sm text-muted-foreground">
+                A written summary is not available for this team yet.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70 bg-card/90">
+          <CardHeader className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Badge variant="outline">Performance</Badge>
+                <CardTitle className="mt-2 text-lg">{activeStatPage.label}</CardTitle>
+                <CardDescription className="mt-1">
+                  Page {statPageIndex + 1} of {statPages.length}
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  disabled={statPages.length <= 1}
+                  onClick={() =>
+                    setStatPageIndex((currentIndex) =>
+                      statPages.length === 0
+                        ? 0
+                        : (currentIndex - 1 + statPages.length) % statPages.length
+                    )
+                  }
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  disabled={statPages.length <= 1}
+                  onClick={() =>
+                    setStatPageIndex((currentIndex) =>
+                      statPages.length === 0 ? 0 : (currentIndex + 1) % statPages.length
+                    )
+                  }
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
               </div>
             </div>
-
-            <div className="hero-summary">
-              <div className="hero-stat">
-                <span>Record</span>
-                <strong>
-                  {overview.tba.wins}-{overview.tba.losses}-{overview.tba.ties}
-                </strong>
-              </div>
-              <div className="hero-stat">
-                <span>Auto APC</span>
-                <strong>{overview.robot.autoFuelApc.toFixed(1)}</strong>
-              </div>
-              <div className="hero-stat">
-                <span>Tele APC</span>
-                <strong>{overview.robot.teleFuelApc.toFixed(1)}</strong>
-              </div>
-              <div className="hero-stat">
-                <span>Total defense</span>
-                <strong>{overview.robot.totalDefenseScore.toFixed(1)}</strong>
-              </div>
-            </div>
-          </section>
-
-          <section className="detail-grid animate-in">
-            <div className="surface-card trend-surface">
-              <div className="section-heading">
-                <div>
-                  <div className="section-kicker">Trend</div>
-                  <h2>{selectedMetric.label}</h2>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {activeStatPage.items.map((item) => (
+                <div key={item.label} className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                      {item.label}
+                    </p>
+                    {item.rankKey ? (
+                      <Badge variant="outline">{formatRank(teamRanks[item.rankKey]) ?? "Unranked"}</Badge>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 font-mono text-lg font-semibold">{item.value}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.note}</p>
                 </div>
-              </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-              <div className="metric-switcher">
-                {metrics.map((metric) => (
-                  <button
-                    key={metric.id}
-                    type="button"
-                    className={`metric-switch ${
-                      metric.id === selectedMetric.id ? 'active' : ''
-                    }`}
-                    onClick={() => setMetricId(metric.id)}
-                  >
-                    {metric.label}
-                  </button>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Card className="border-border/70 bg-card/90">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">Defense</Badge>
+              <Badge variant="outline">Score {overview.robot.defenseScore.toFixed(1)}</Badge>
+            </div>
+            <CardTitle className="mt-2 text-lg">Defensive Profile</CardTitle>
+            <CardDescription>
+              Observed defensive traits across matches.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {defenseRows.map((row) => (
+              <div key={row.label} className="grid grid-cols-[minmax(0,1fr)_80px_72px] items-center gap-3 rounded-lg border border-border/80 bg-muted/20 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{row.label}</p>
+                </div>
+                <p className="text-right font-mono text-sm text-foreground">{row.score}</p>
+                <p className="text-right font-mono text-sm text-muted-foreground">{row.quantity}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70 bg-card/90">
+          <CardHeader>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">Auto Paths</Badge>
+              <Badge variant="outline">
+                Most used {mostUsedAutoPath ? `${mostUsedAutoPath.label} (${mostUsedAutoPath.count})` : "None"}
+              </Badge>
+            </div>
+            <CardTitle className="mt-2 text-lg">Auto Paths</CardTitle>
+            <CardDescription>
+              Quantity of each observed auto path.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {autoPathRows.map((row) => (
+              <div key={row.key} className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/20 px-3 py-2">
+                <p className="text-sm font-medium">{row.label}</p>
+                <p className="font-mono text-sm text-muted-foreground">{row.count}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="border-border/70 bg-card/90">
+        <CardHeader className="gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">Performance</Badge>
+              <Badge variant="outline">{trendMetricOption.label}</Badge>
+            </div>
+            <CardTitle className="mt-2 text-lg">Performance Trend</CardTitle>
+            <CardDescription className="mt-1">
+              Match-by-match performance over time.
+            </CardDescription>
+          </div>
+
+          <div className="grid w-full gap-2 sm:grid-cols-2 lg:w-[420px]">
+            <Select value={trendMetric} onValueChange={(value) => setTrendMetric(value as TrendMetricKey)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Metric" />
+              </SelectTrigger>
+              <SelectContent>
+                {trendMetricOptions.map((option) => (
+                  <SelectItem key={option.key} value={option.key}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={trendRange} onValueChange={(value) => setTrendRange(value as TrendRangeKey)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Range" />
+              </SelectTrigger>
+              <SelectContent>
+                {trendRangeOptions.map((option) => (
+                  <SelectItem key={option.key} value={option.key}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <TrendChart values={trendValues} labels={trendLabels} formatValue={trendMetricOption.format} />
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+              <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                Average
+              </p>
+              <p className="mt-2 font-mono text-lg font-semibold">{trendMetricOption.format(trendAverage)}</p>
+            </div>
+            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+              <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                Trend
+              </p>
+              <p className="mt-2 font-mono text-lg font-semibold">
+                {trendValues.length >= 2 ? `${trendDelta >= 0 ? "+" : ""}${trendDelta.toFixed(0)}%` : "-"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+              <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                Best
+              </p>
+              <p className="mt-2 font-mono text-lg font-semibold">{trendMetricOption.format(trendBest)}</p>
+            </div>
+            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                Matches shown
+                </p>
+                <p className="mt-2 font-mono text-lg font-semibold">{trendSeries.length}</p>
+              </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Card className="border-border/70 bg-card/90">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">Matches</Badge>
+              <Badge variant="outline">{qualificationMatches.length} shown</Badge>
+            </div>
+            <CardTitle className="mt-2 text-lg">Match Details</CardTitle>
+            <CardDescription>Match-by-match scoring and defensive performance.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {qualificationMatches.length > 0 ? (
+              <div className="space-y-3">
+                {qualificationMatches.map((match) => (
+                  <div key={match.matchKey} className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">
+                          {formatMatchLabel(match.matchKey, match.matchNumber)}
+                        </p>
+                        <Badge variant="outline">
+                          {match.robot ? "Data available" : "No details"}
+                        </Badge>
+                      </div>
+                      {match.robot?.drivetrain ? (
+                        <Badge variant="outline">{titleCase(match.robot.drivetrain)}</Badge>
+                      ) : null}
+                    </div>
+
+                    {match.robot ? (
+                      <>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                          <div className="rounded-md border border-border/80 bg-background/40 px-2.5 py-2">
+                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Auto</p>
+                            <p className="mt-1 font-mono text-sm">
+                              {(match.robot.auto.cycles.cycleCount * (match.robot.auto.cycles.fuelCountAvg ?? 0)).toFixed(1)}
+                            </p>
+                          </div>
+                          <div className="rounded-md border border-border/80 bg-background/40 px-2.5 py-2">
+                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Tele</p>
+                            <p className="mt-1 font-mono text-sm">
+                              {(match.robot.tele.cycles.cycleCount * (match.robot.tele.cycles.fuelCountAvg ?? 0)).toFixed(1)}
+                            </p>
+                          </div>
+                          <div className="rounded-md border border-border/80 bg-background/40 px-2.5 py-2">
+                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Defense</p>
+                            <p className="mt-1 font-mono text-sm">{match.robot.defense.calculatedScore.toFixed(1)}</p>
+                          </div>
+                          <div className="rounded-md border border-border/80 bg-background/40 px-2.5 py-2">
+                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Failures</p>
+                            <p className="mt-1 font-mono text-sm">{match.robot.failures.count}</p>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          {match.robot.autoPath ? (
+                            <Badge variant="outline">{titleCase(match.robot.autoPath)}</Badge>
+                          ) : null}
+                          {match.robot.notes ? (
+                            <Badge variant="outline">Match notes</Badge>
+                          ) : null}
+                          {match.robot.defenseNotes ? (
+                            <Badge variant="outline">Defensive notes</Badge>
+                          ) : null}
+                        </div>
+
+                        {match.robot.notes ? (
+                          <p className="mt-3 text-sm leading-5 text-foreground/90">{match.robot.notes}</p>
+                        ) : null}
+                        {match.robot.defenseNotes ? (
+                          <p className="mt-2 text-sm leading-5 text-muted-foreground">{match.robot.defenseNotes}</p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="mt-3 text-sm text-muted-foreground">
+                        Detailed match data is not available for this match.
+                      </p>
+                    )}
+                  </div>
                 ))}
               </div>
-
-              <TrendChart
-                values={values}
-                labels={labels}
-                formatValue={selectedMetric.format}
-                detailValues={detailValues}
-                formatDetail={selectedMetric.detailFormat}
-                averageDetailValue={averageDetail}
-              />
-
-              <div className="trend-summary-grid">
-                <div className="trend-summary-card">
-                  <span>Average</span>
-                  <strong>{selectedMetric.format(average)}</strong>
-                </div>
-                <div className="trend-summary-card">
-                  <span>Trend</span>
-                  <strong>
-                    {trend >= 0 ? '+' : ''}
-                    {trend.toFixed(1)}%
-                  </strong>
-                </div>
-                <div className="trend-summary-card">
-                  <span>Best</span>
-                  <strong>{selectedMetric.format(best)}</strong>
-                </div>
-                <div className="trend-summary-card">
-                  <span>Data points</span>
-                  <strong>{values.length}</strong>
-                </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border/80 bg-muted/10 p-6 text-sm text-muted-foreground">
+                No matches are available for this event.
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70 bg-card/90">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">Team Notes</Badge>
+              <Badge variant="outline">{noteList.length} entries</Badge>
             </div>
-
-            <div className="surface-card profile-surface">
-              <div className="section-heading">
-                <div>
-                  <div className="section-kicker">Stats</div>
-                  <h2>Team Stats</h2>
-                </div>
-                {teamCount > 0 ? (
-                  <span className="section-note">{teamCount} teams</span>
-                ) : null}
-              </div>
-
-              {activeSection ? (
-                <div className="profile-carousel">
-                  <div className="profile-carousel-header">
-                    <button
-                      type="button"
-                      className="profile-carousel-arrow"
-                      onClick={() => cycleSection(-1)}
-                      aria-label="Show previous stat group"
-                    >
-                      ←
-                    </button>
-                    <div className="profile-section-heading">
-                      <div className="profile-section-label">
-                        {activeSection.label}
-                      </div>
-                      <span className="section-note">
-                        {sectionIndex + 1} of {statSections.length}
-                      </span>
+            <CardTitle className="mt-2 text-lg">Team Notes</CardTitle>
+            <CardDescription>Recent observations about the team.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {noteList.length > 0 ? (
+              <div className="space-y-3">
+                {noteList.map((note) => (
+                  <div key={note.id} className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">{scoutNames[note.scoutId] ?? "Unknown author"}</p>
+                      <Badge variant="outline">{formatNoteDate(note.createdAt)}</Badge>
+                      {note.matchKey ? (
+                        <Badge variant="outline">{formatMatchLabel(note.matchKey)}</Badge>
+                      ) : null}
                     </div>
-                    <button
-                      type="button"
-                      className="profile-carousel-arrow"
-                      onClick={() => cycleSection(1)}
-                      aria-label="Show next stat group"
-                    >
-                      →
-                    </button>
+                    <p className="mt-2 text-sm leading-5 text-foreground/90">{note.content}</p>
                   </div>
-
-                  <section className="profile-section">
-                    <div className="profile-grid">
-                      {activeSection.items.map((item) => {
-                        const rank = item.rankKey ? teamRanks[item.rankKey] : undefined;
-                        const rankTone =
-                          rank && teamCount > 0
-                            ? getRankTone(rank, teamCount)
-                            : 'neutral';
-
-                        return (
-                          <article
-                            key={`${activeSection.label}-${item.label}`}
-                            className="profile-item"
-                          >
-                            <div className="profile-item-top">
-                              <span>{item.label}</span>
-                              {rank ? (
-                                <span className={`stat-rank stat-rank-${rankTone}`}>
-                                  #{rank}
-                                </span>
-                              ) : null}
-                            </div>
-                            <strong>{item.value}</strong>
-                            <small>{item.subtitle}</small>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  </section>
-                </div>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="surface-card animate-in">
-              <div className="section-heading">
-                <div>
-                  <div className="section-kicker">Matches</div>
-                  <h2>All Matches</h2>
-                </div>
-                {displayedMatches.length > 0 ? (
-                  <span className="section-note">{displayedMatches.length} shown</span>
-                ) : null}
+                ))}
               </div>
-
-            <div className="match-grid">
-              {displayedMatches.map((match) => (
-                <article key={match.matchKey} className="match-card">
-                  <div className="match-card-head">
-                    <span className="match-chip">QM {match.matchNumber}</span>
-                    <span className="match-chip match-chip-muted">
-                      {match.robot ? 'Scouted' : 'No scout'}
-                    </span>
-                  </div>
-
-                  {match.robot ? (
-                    <>
-                      <div className="match-metric-grid">
-                        <div>
-                          <span>Auto</span>
-                          <strong>{getPhaseMatchScore(match.robot.auto).toFixed(1)}</strong>
-                        </div>
-                        <div>
-                          <span>Tele</span>
-                          <strong>{getPhaseMatchScore(match.robot.tele).toFixed(1)}</strong>
-                        </div>
-                        <div>
-                          <span>Defense</span>
-                          <strong>
-                            {(
-                              match.robot.defense.intake.effNum +
-                              match.robot.defense.offense.effNum
-                            ).toFixed(1)}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Failures</span>
-                          <strong>{match.robot.failures.count.toFixed(0)}</strong>
-                        </div>
-                      </div>
-                      <p className="match-note">
-                        {match.robot.notes?.trim() || 'No notes.'}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="match-note">
-                      No scout data.
-                    </p>
-                  )}
-                </article>
-              ))}
-
-              {displayedMatches.length === 0 ? (
-                <div className="empty-state compact">
-                  <strong>No matches yet.</strong>
-                </div>
-              ) : null}
-            </div>
-          </section>
-        </>
-      ) : null}
+            ) : (
+              <div className="rounded-lg border border-dashed border-border/80 bg-muted/10 p-6 text-sm text-muted-foreground">
+                No team notes are available.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
-  );
+  )
 }

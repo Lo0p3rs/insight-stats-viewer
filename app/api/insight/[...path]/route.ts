@@ -1,12 +1,8 @@
 import type { NextRequest } from 'next/server';
+import { getServerConfig } from '@/lib/server-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const API_BASE =
-  process.env.INSIGHT_API_BASE ??
-  process.env.NEXT_PUBLIC_API_BASE ??
-  'https://insight-api.futuremartians.org/';
 
 const FORWARDED_REQUEST_HEADERS = [
   'accept',
@@ -18,7 +14,10 @@ const FORWARDED_REQUEST_HEADERS = [
 const FORWARDED_RESPONSE_HEADERS = ['content-type', 'www-authenticate'];
 
 function buildTargetUrl(pathSegments: string[], search: string) {
-  const base = API_BASE.endsWith('/') ? API_BASE.slice(0, -1) : API_BASE;
+  const { insightApiBase } = getServerConfig();
+  const base = insightApiBase.endsWith('/')
+    ? insightApiBase.slice(0, -1)
+    : insightApiBase;
   const path = pathSegments.join('/');
   const targetUrl = new URL(`${base}/${path}`);
   targetUrl.search = search;
@@ -40,6 +39,7 @@ async function proxyRequest(
 ) {
   const targetUrl = buildTargetUrl(context.params.path, request.nextUrl.search);
   const headers = new Headers();
+  const { insightProxyTimeoutMs } = getServerConfig();
 
   FORWARDED_REQUEST_HEADERS.forEach((headerName) => {
     const value = request.headers.get(headerName);
@@ -48,7 +48,7 @@ async function proxyRequest(
     }
   });
 
-  const timeout = createTimeoutSignal(20000);
+  const timeout = createTimeoutSignal(insightProxyTimeoutMs);
   const init: RequestInit = {
     method: request.method,
     headers,
