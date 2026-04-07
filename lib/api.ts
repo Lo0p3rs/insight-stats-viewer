@@ -43,7 +43,7 @@ const REQUEST_TIMEOUT_MS = 20000;
 
 const DEFAULT_HEADERS = {
   Accept: 'application/json',
-  'X-FMS-VERSION': '2.0.0+1',
+  'X-FMS-VERSION': '2.0.1',
 };
 
 const USERNAME = 'insight_user';
