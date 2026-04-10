@@ -195,7 +195,7 @@ function buildCsv(headers: string[], records: Array<Record<string, CsvValue>>) {
 function buildTeamNotesText(teamAnalytics: TeamAnalytics | null) {
   if (!teamAnalytics || teamAnalytics.robot.scoutNotes.length === 0) return ""
   return [...teamAnalytics.robot.scoutNotes]
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .sort((firstNote, secondNote) => firstNote.createdAt.localeCompare(secondNote.createdAt))
     .map((note) => {
       const context = note.matchKey ? `${note.createdAt} ${note.matchKey}` : note.createdAt
       return `[${context}] ${note.content}`
@@ -203,7 +203,7 @@ function buildTeamNotesText(teamAnalytics: TeamAnalytics | null) {
     .join(" | ")
 }
 
-function calculateMatchFuel(cycleCount: number, fuelCountAvg: number | null) {
+function calculateTotalMatchFuel(cycleCount: number, fuelCountAvg: number | null) {
   return cycleCount * (fuelCountAvg ?? 0)
 }
 
@@ -353,7 +353,15 @@ export default function OverviewPage() {
 
   const handleExportCsv = async () => {
     const token = getToken()
-    if (!token || !selectedEventKey || exporting) return
+    if (!selectedEventKey) {
+      setError(new Error("Select an event before exporting."))
+      return
+    }
+    if (!token) {
+      setError(new Error("You must be logged in to export event data."))
+      return
+    }
+    if (exporting) return
 
     const teamKeys =
       eventTeams.length > 0
@@ -472,13 +480,13 @@ export default function OverviewPage() {
             match_number: match.matchNumber,
             set_number: match.setNumber,
             match_auto_fuel: match.robot
-              ? calculateMatchFuel(
+              ? calculateTotalMatchFuel(
                   match.robot.auto.cycles.cycleCount,
                   match.robot.auto.cycles.fuelCountAvg
                 ).toFixed(2)
               : "",
             match_tele_fuel: match.robot
-              ? calculateMatchFuel(
+              ? calculateTotalMatchFuel(
                   match.robot.tele.cycles.cycleCount,
                   match.robot.tele.cycles.fuelCountAvg
                 ).toFixed(2)
