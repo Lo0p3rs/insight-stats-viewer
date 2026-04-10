@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react"
 
 import RetryError from "@/components/RetryError"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -21,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { fetchEventTeams, fetchTeamAnalytics } from "@/lib/api"
+import { fetchEventTeams, fetchTeamAnalytics, fetchTeamDetail } from "@/lib/api"
 import { getToken } from "@/lib/auth"
 import { useEventContext } from "@/lib/event-context"
 import { formatEventDate, formatPercent } from "@/lib/format"
@@ -36,7 +37,7 @@ import {
   teamNumberFromKey,
 } from "@/lib/team-utils"
 import { cn } from "@/lib/utils"
-import type { EventTeam, TeamAnalytics } from "@/lib/types"
+import type { EventTeam, TeamAnalytics, TeamDetail } from "@/lib/types"
 
 type SortKey =
   | "team"
@@ -172,6 +173,40 @@ function getMetricStatusClass(status: MetricStatus) {
   }
 }
 
+type CsvValue = string | number | boolean | null | undefined
+
+function escapeCsvValue(value: CsvValue) {
+  if (value === null || value === undefined) return ""
+  const normalized = String(value)
+  if (/[",\n]/.test(normalized)) {
+    return `"${normalized.replaceAll('"', '""')}"`
+  }
+  return normalized
+}
+
+function buildCsv(headers: string[], records: Array<Record<string, CsvValue>>) {
+  const lines = [
+    headers.join(","),
+    ...records.map((record) => headers.map((header) => escapeCsvValue(record[header])).join(",")),
+  ]
+  return lines.join("\n")
+}
+
+function buildTeamNotesText(teamAnalytics: TeamAnalytics | null) {
+  if (!teamAnalytics || teamAnalytics.robot.scoutNotes.length === 0) return ""
+  return [...teamAnalytics.robot.scoutNotes]
+    .sort((firstNote, secondNote) => firstNote.createdAt.localeCompare(secondNote.createdAt))
+    .map((note) => {
+      const context = note.matchKey ? `${note.createdAt} ${note.matchKey}` : note.createdAt
+      return `[${context}] ${note.content}`
+    })
+    .join(" | ")
+}
+
+function calculateTotalMatchFuel(cycleCount: number, fuelCountAvg: number | null) {
+  return cycleCount * (fuelCountAvg ?? 0)
+}
+
 export default function OverviewPage() {
   const {
     selectedEvent,
@@ -186,6 +221,7 @@ export default function OverviewPage() {
   const [reloadNonce, setReloadNonce] = useState(0)
   const [sortKey, setSortKey] = useState<SortKey>("rank")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     if (eventLoading) return
@@ -315,6 +351,170 @@ export default function OverviewPage() {
     setSortDir(getDefaultDirection(key))
   }
 
+  const handleExportCsv = async () => {
+    const token = getToken()
+    if (!selectedEventKey) {
+      setError(new Error("Select an event before exporting."))
+      return
+    }
+    if (!token) {
+      setError(new Error("You must be logged in to export event data."))
+      return
+    }
+    if (exporting) return
+
+    const teamKeys =
+      eventTeams.length > 0
+        ? eventTeams.map((team) => team.teamKey)
+        : Array.from(new Set(teams.map((team) => team.teamKey)))
+    if (teamKeys.length === 0) return
+
+    setExporting(true)
+    setError(null)
+
+    try {
+      const overviewByTeamKey = new Map(teams.map((team) => [team.teamKey, team]))
+      const detailResults = await Promise.allSettled(
+        teamKeys.map((teamKey) => fetchTeamDetail(token, teamKey, selectedEventKey))
+      )
+      const details: TeamDetail[] = detailResults
+        .filter((result): result is PromiseFulfilledResult<TeamDetail> => result.status === "fulfilled")
+        .map((result) => result.value)
+      const failedCount = detailResults.length - details.length
+
+      if (details.length === 0) {
+        throw new Error(
+          `Failed to fetch team details for export (0/${detailResults.length} successful). Please try again.`
+        )
+      }
+
+      const headers = [
+        "event_key",
+        "team_key",
+        "team_number",
+        "team_name",
+        "rank",
+        "wins",
+        "losses",
+        "ties",
+        "total_apc",
+        "auto_apc",
+        "tele_apc",
+        "avg_cycles",
+        "avg_accuracy",
+        "defense_score",
+        "team_note_count",
+        "team_notes",
+        "export_status",
+        "match_key",
+        "match_level",
+        "match_number",
+        "set_number",
+        "match_auto_fuel",
+        "match_tele_fuel",
+        "match_defense_score",
+        "match_failures",
+        "match_auto_path",
+        "match_notes",
+        "match_defense_notes",
+      ]
+
+      const records: Array<Record<string, CsvValue>> = []
+
+      details.forEach((detail) => {
+        const overview =
+          overviewByTeamKey.get(detail.teamKey) ??
+          detail.overviews.find((entry) => entry.eventKey === selectedEventKey) ??
+          detail.overviews[0] ??
+          null
+        const teamNumber = teamNumberFromKey(detail.teamKey)
+        const teamName = overview?.name ?? eventTeams.find((entry) => entry.teamKey === detail.teamKey)?.name ?? ""
+        const teamNotes = buildTeamNotesText(overview)
+        const matches = [...detail.matches]
+          .filter((match) => match.eventKey === selectedEventKey)
+          .sort((left, right) => left.matchSort - right.matchSort)
+
+        const overviewFields = {
+          event_key: selectedEventKey,
+          team_key: detail.teamKey,
+          team_number: teamNumber,
+          team_name: teamDisplayName(teamName),
+          rank: overview?.tba.rank ?? "",
+          wins: overview?.tba.wins ?? "",
+          losses: overview?.tba.losses ?? "",
+          ties: overview?.tba.ties ?? "",
+          total_apc: overview ? getCombinedApc(overview).toFixed(2) : "",
+          auto_apc: overview ? overview.robot.autoFuelApc.toFixed(2) : "",
+          tele_apc: overview ? overview.robot.teleFuelApc.toFixed(2) : "",
+          avg_cycles: overview ? getCombinedCycles(overview).toFixed(2) : "",
+          avg_accuracy: overview ? getCombinedAccuracy(overview).toFixed(2) : "",
+          defense_score: overview ? overview.robot.defenseScore.toFixed(2) : "",
+          team_note_count: overview?.robot.scoutNotes.length ?? 0,
+          team_notes: teamNotes,
+          export_status: failedCount > 0 ? `Warning: ${failedCount} teams failed to fetch` : "",
+        }
+
+        if (matches.length === 0) {
+          records.push({
+            ...overviewFields,
+            match_key: "",
+            match_level: "",
+            match_number: "",
+            set_number: "",
+            match_auto_fuel: "",
+            match_tele_fuel: "",
+            match_defense_score: "",
+            match_failures: "",
+            match_auto_path: "",
+            match_notes: "",
+            match_defense_notes: "",
+          })
+          return
+        }
+
+        matches.forEach((match) => {
+          records.push({
+            ...overviewFields,
+            match_key: match.matchKey,
+            match_level: match.level,
+            match_number: match.matchNumber,
+            set_number: match.setNumber,
+            match_auto_fuel: match.robot
+              ? calculateTotalMatchFuel(
+                  match.robot.auto.cycles.cycleCount,
+                  match.robot.auto.cycles.fuelCountAvg
+                ).toFixed(2)
+              : "",
+            match_tele_fuel: match.robot
+              ? calculateTotalMatchFuel(
+                  match.robot.tele.cycles.cycleCount,
+                  match.robot.tele.cycles.fuelCountAvg
+                ).toFixed(2)
+              : "",
+            match_defense_score: match.robot ? match.robot.defense.calculatedScore.toFixed(2) : "",
+            match_failures: match.robot ? match.robot.failures.count : "",
+            match_auto_path: match.robot?.autoPath ?? "",
+            match_notes: match.robot?.notes ?? "",
+            match_defense_notes: match.robot?.defenseNotes ?? "",
+          })
+        })
+      })
+
+      const csv = buildCsv(headers, records)
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement("a")
+      anchor.href = url
+      anchor.download = `${selectedEventKey}-event-export.csv`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    } catch (exportError) {
+      setError(exportError)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const pageLoading = eventLoading || loading
 
   return (
@@ -337,30 +537,37 @@ export default function OverviewPage() {
             </CardDescription>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
-              <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                Teams
-              </div>
-              <div className="mt-2 font-mono text-lg font-semibold">{rows.length}</div>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <Button type="button" variant="outline" disabled={pageLoading || rows.length === 0 || exporting} onClick={handleExportCsv}>
+                {exporting ? "Exporting..." : "Export event CSV"}
+              </Button>
             </div>
-            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
-              <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                Avg total APC
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Teams
+                </div>
+                <div className="mt-2 font-mono text-lg font-semibold">{rows.length}</div>
               </div>
-              <div className="mt-2 font-mono text-lg font-semibold">{averageTotalApc.toFixed(1)}</div>
-            </div>
-            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
-              <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                Avg accuracy
+              <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Avg total APC
+                </div>
+                <div className="mt-2 font-mono text-lg font-semibold">{averageTotalApc.toFixed(1)}</div>
               </div>
-              <div className="mt-2 font-mono text-lg font-semibold">{formatPercent(averageAccuracy)}</div>
-            </div>
-            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
-              <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                Avg defense
+              <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Avg accuracy
+                </div>
+                <div className="mt-2 font-mono text-lg font-semibold">{formatPercent(averageAccuracy)}</div>
               </div>
-              <div className="mt-2 font-mono text-lg font-semibold">{averageDefense.toFixed(1)}</div>
+              <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+                <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Avg defense
+                </div>
+                <div className="mt-2 font-mono text-lg font-semibold">{averageDefense.toFixed(1)}</div>
+              </div>
             </div>
           </div>
         </CardHeader>
