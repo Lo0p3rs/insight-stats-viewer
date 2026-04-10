@@ -192,15 +192,19 @@ function buildCsv(headers: string[], records: Array<Record<string, CsvValue>>) {
   return lines.join("\n")
 }
 
-function buildTeamNotesText(team: TeamAnalytics | null) {
-  if (!team || team.robot.scoutNotes.length === 0) return ""
-  return [...team.robot.scoutNotes]
+function buildTeamNotesText(teamAnalytics: TeamAnalytics | null) {
+  if (!teamAnalytics || teamAnalytics.robot.scoutNotes.length === 0) return ""
+  return [...teamAnalytics.robot.scoutNotes]
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
     .map((note) => {
       const context = note.matchKey ? `${note.createdAt} ${note.matchKey}` : note.createdAt
       return `[${context}] ${note.content}`
     })
     .join(" | ")
+}
+
+function calculateMatchFuel(cycleCount: number, fuelCountAvg: number | null) {
+  return cycleCount * (fuelCountAvg ?? 0)
 }
 
 export default function OverviewPage() {
@@ -351,7 +355,10 @@ export default function OverviewPage() {
     const token = getToken()
     if (!token || !selectedEventKey || exporting) return
 
-    const teamKeys = Array.from(new Set([...eventTeams.map((team) => team.teamKey), ...teams.map((team) => team.teamKey)]))
+    const teamKeys =
+      eventTeams.length > 0
+        ? eventTeams.map((team) => team.teamKey)
+        : Array.from(new Set(teams.map((team) => team.teamKey)))
     if (teamKeys.length === 0) return
 
     setExporting(true)
@@ -365,9 +372,12 @@ export default function OverviewPage() {
       const details: TeamDetail[] = detailResults
         .filter((result): result is PromiseFulfilledResult<TeamDetail> => result.status === "fulfilled")
         .map((result) => result.value)
+      const failedCount = detailResults.length - details.length
 
       if (details.length === 0) {
-        throw new Error("No team detail data could be exported.")
+        throw new Error(
+          `Failed to fetch team details for export (0/${detailResults.length} successful). Please try again.`
+        )
       }
 
       const headers = [
@@ -460,10 +470,16 @@ export default function OverviewPage() {
             match_number: match.matchNumber,
             set_number: match.setNumber,
             match_auto_fuel: match.robot
-              ? (match.robot.auto.cycles.cycleCount * (match.robot.auto.cycles.fuelCountAvg ?? 0)).toFixed(2)
+              ? calculateMatchFuel(
+                  match.robot.auto.cycles.cycleCount,
+                  match.robot.auto.cycles.fuelCountAvg
+                ).toFixed(2)
               : "",
             match_tele_fuel: match.robot
-              ? (match.robot.tele.cycles.cycleCount * (match.robot.tele.cycles.fuelCountAvg ?? 0)).toFixed(2)
+              ? calculateMatchFuel(
+                  match.robot.tele.cycles.cycleCount,
+                  match.robot.tele.cycles.fuelCountAvg
+                ).toFixed(2)
               : "",
             match_defense_score: match.robot ? match.robot.defense.calculatedScore.toFixed(2) : "",
             match_failures: match.robot ? match.robot.failures.count : "",
