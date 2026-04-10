@@ -397,6 +397,7 @@ export default function OverviewPage() {
         "defense_score",
         "team_note_count",
         "team_notes",
+        "export_status",
         "match_key",
         "match_level",
         "match_number",
@@ -438,10 +439,11 @@ export default function OverviewPage() {
           auto_apc: overview ? overview.robot.autoFuelApc.toFixed(2) : "",
           tele_apc: overview ? overview.robot.teleFuelApc.toFixed(2) : "",
           avg_cycles: overview ? getCombinedCycles(overview).toFixed(2) : "",
-          avg_accuracy: overview ? getCombinedAccuracy(overview).toFixed(4) : "",
+          avg_accuracy: overview ? getCombinedAccuracy(overview).toFixed(2) : "",
           defense_score: overview ? overview.robot.defenseScore.toFixed(2) : "",
           team_note_count: overview?.robot.scoutNotes.length ?? 0,
           team_notes: teamNotes,
+          export_status: failedCount > 0 ? `Warning: ${failedCount} teams failed to fetch` : "",
         }
 
         if (matches.length === 0) {
