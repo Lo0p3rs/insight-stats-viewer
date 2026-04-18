@@ -697,13 +697,13 @@ export function buildAllianceFit(
   }> = [
     {
       role: 'Auto Lead',
-      statLabel: 'Auto APC',
+      statLabel: 'Auto actual',
       scoreKey: 'auto',
       format: (entry) => entry.team.robot.autoFuelApc.toFixed(1),
     },
     {
       role: 'Tele Carry',
-      statLabel: 'Tele APC',
+      statLabel: 'Tele actual',
       scoreKey: 'tele',
       format: (entry) => entry.team.robot.teleFuelApc.toFixed(1),
     },
@@ -1123,7 +1123,7 @@ export function buildMatchPrediction(
       redValue: redFuelProjection.auto,
       blueValue: blueFuelProjection.auto,
       detail:
-        'Auto projection blends APC with alliance auto scoring strength, then lightly regresses only the event\'s top auto scorers.',
+        'Auto projection blends recent actual contribution with alliance auto scoring strength, then lightly regresses only the event\'s top auto scorers.',
     },
     {
       label: 'Tele Fuel',
@@ -1131,7 +1131,7 @@ export function buildMatchPrediction(
       redValue: redFuelProjection.tele,
       blueValue: blueFuelProjection.tele,
       detail:
-        'Tele projection blends APC with alliance tele scoring strength, lightly regresses only the event\'s top tele scorers, slightly discounts defense-first lower scorers, and adds defense pressure.',
+        'Tele projection blends recent actual contribution with alliance tele scoring strength, lightly regresses only the event\'s top tele scorers, slightly discounts defense-first lower scorers, and adds defense pressure.',
     },
   ] satisfies MatchPredictionPhaseProjection[];
 

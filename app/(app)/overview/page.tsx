@@ -15,6 +15,13 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Table,
   TableBody,
   TableCell,
@@ -28,8 +35,13 @@ import { useEventContext } from "@/lib/event-context"
 import { formatEventDate, formatPercent } from "@/lib/format"
 import {
   getCombinedAccuracy,
-  getCombinedApc,
   getCombinedCycles,
+  getMedianActualContribution,
+  getMedianEstimatedContribution,
+  getRecentActualContribution,
+  getRecentEstimatedContribution,
+  type ContributionPhase,
+  type ContributionStatMode,
 } from "@/lib/team-metrics"
 import {
   teamAvatarUrl,
@@ -56,14 +68,41 @@ type TeamRow = TeamAnalytics & {
 
 type MetricStatus = "high" | "mid" | "low" | "neutral"
 
-const columns: Array<{
+function getContributionModeLabel(mode: ContributionStatMode) {
+  return mode === "median" ? "median" : "mean"
+}
+
+function getOverviewActualContribution(
+  team: TeamRow,
+  phase: ContributionPhase,
+  mode: ContributionStatMode
+) {
+  return mode === "median"
+    ? getMedianActualContribution(team, phase)
+    : getRecentActualContribution(team, phase)
+}
+
+function getOverviewEstimatedContribution(
+  team: TeamRow,
+  phase: ContributionPhase,
+  mode: ContributionStatMode
+) {
+  return mode === "median"
+    ? getMedianEstimatedContribution(team, phase)
+    : getRecentEstimatedContribution(team, phase)
+}
+
+function buildColumns(contributionMode: ContributionStatMode): Array<{
   key: SortKey
   label: string
   numeric?: boolean
   percentileDirection?: "asc" | "desc"
-  value: (team: TeamRow) => number | string
+  value: (team: TeamRow) => number | string | null
   render: (team: TeamRow) => React.ReactNode
-}> = [
+}> {
+  const contributionLabel = getContributionModeLabel(contributionMode)
+
+  return [
   {
     key: "team",
     label: "Team",
@@ -95,27 +134,39 @@ const columns: Array<{
   },
   {
     key: "totalApc",
-    label: "Total APC",
+    label: `Total ${contributionLabel}`,
     numeric: true,
     percentileDirection: "desc",
-    value: (team) => getCombinedApc(team),
-    render: (team) => <span>{getCombinedApc(team).toFixed(1)}</span>,
+    value: (team) => getOverviewActualContribution(team, "total", contributionMode),
+    render: (team) =>
+      renderContributionValue(
+        getOverviewActualContribution(team, "total", contributionMode),
+        getOverviewEstimatedContribution(team, "total", contributionMode)
+      ),
   },
   {
     key: "autoApc",
-    label: "Auto APC",
+    label: `Auto ${contributionLabel}`,
     numeric: true,
     percentileDirection: "desc",
-    value: (team) => team.robot.autoFuelApc,
-    render: (team) => <span>{team.robot.autoFuelApc.toFixed(1)}</span>,
+    value: (team) => getOverviewActualContribution(team, "auto", contributionMode),
+    render: (team) =>
+      renderContributionValue(
+        getOverviewActualContribution(team, "auto", contributionMode),
+        getOverviewEstimatedContribution(team, "auto", contributionMode)
+      ),
   },
   {
     key: "teleApc",
-    label: "Tele APC",
+    label: `Tele ${contributionLabel}`,
     numeric: true,
     percentileDirection: "desc",
-    value: (team) => team.robot.teleFuelApc,
-    render: (team) => <span>{team.robot.teleFuelApc.toFixed(1)}</span>,
+    value: (team) => getOverviewActualContribution(team, "tele", contributionMode),
+    render: (team) =>
+      renderContributionValue(
+        getOverviewActualContribution(team, "tele", contributionMode),
+        getOverviewEstimatedContribution(team, "tele", contributionMode)
+      ),
   },
   {
     key: "avgCycles",
@@ -142,6 +193,7 @@ const columns: Array<{
     render: (team) => <span>{team.robot.defenseScore.toFixed(1)}</span>,
   },
 ]
+}
 
 function getDefaultDirection(key: SortKey) {
   return key === "team" || key === "rank" ? "asc" : "desc"
@@ -207,6 +259,17 @@ function calculateTotalMatchFuel(cycleCount: number, fuelCountAvg: number | null
   return cycleCount * (fuelCountAvg ?? 0)
 }
 
+function renderContributionValue(actual: number | null, estimated: number | null) {
+  return (
+    <div>
+      <div>{actual !== null ? actual.toFixed(1) : "—"}</div>
+      {estimated !== null ? (
+        <div className="text-xs text-muted-foreground">Est {estimated.toFixed(1)}</div>
+      ) : null}
+    </div>
+  )
+}
+
 export default function OverviewPage() {
   const {
     selectedEvent,
@@ -221,6 +284,7 @@ export default function OverviewPage() {
   const [reloadNonce, setReloadNonce] = useState(0)
   const [sortKey, setSortKey] = useState<SortKey>("rank")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
+  const [contributionMode, setContributionMode] = useState<ContributionStatMode>("median")
   const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
@@ -276,12 +340,18 @@ export default function OverviewPage() {
     }))
   }, [eventTeams, teams])
 
+  const columns = useMemo(() => buildColumns(contributionMode), [contributionMode])
   const activeColumn = columns.find((column) => column.key === sortKey) ?? columns[0]
 
   const sortedRows = useMemo(() => {
     return [...rows].sort((left, right) => {
       const leftValue = activeColumn.value(left)
       const rightValue = activeColumn.value(right)
+
+      if (leftValue === null || rightValue === null) {
+        if (leftValue === rightValue) return 0
+        return leftValue === null ? 1 : -1
+      }
 
       if (typeof leftValue === "string" || typeof rightValue === "string") {
         const comparison = String(leftValue).localeCompare(String(rightValue), undefined, {
@@ -328,10 +398,15 @@ export default function OverviewPage() {
     })
 
     return statuses
-  }, [rows])
+  }, [columns, rows])
 
+  const contributionValues = rows
+    .map((team) => getOverviewActualContribution(team, "total", contributionMode))
+    .filter((value): value is number => value !== null && Number.isFinite(value))
   const averageTotalApc =
-    rows.length > 0 ? rows.reduce((sum, team) => sum + getCombinedApc(team), 0) / rows.length : 0
+    contributionValues.length > 0
+      ? contributionValues.reduce((sum, value) => sum + value, 0) / contributionValues.length
+      : 0
   const averageAccuracy =
     rows.length > 0
       ? rows.reduce((sum, team) => sum + getCombinedAccuracy(team), 0) / rows.length
@@ -400,6 +475,15 @@ export default function OverviewPage() {
         "total_apc",
         "auto_apc",
         "tele_apc",
+        "total_estimated_contribution",
+        "auto_estimated_contribution",
+        "tele_estimated_contribution",
+        "total_median_actual_contribution",
+        "auto_median_actual_contribution",
+        "tele_median_actual_contribution",
+        "total_median_estimated_contribution",
+        "auto_median_estimated_contribution",
+        "tele_median_estimated_contribution",
         "avg_cycles",
         "avg_accuracy",
         "defense_score",
@@ -410,6 +494,15 @@ export default function OverviewPage() {
         "match_level",
         "match_number",
         "set_number",
+        "match_total_actual_contribution",
+        "match_total_estimated_contribution",
+        "match_contribution_status",
+        "match_missing_partner_count",
+        "match_used_partner_priors",
+        "match_auto_actual_contribution",
+        "match_auto_estimated_contribution",
+        "match_tele_actual_contribution",
+        "match_tele_estimated_contribution",
         "match_auto_fuel",
         "match_tele_fuel",
         "match_defense_score",
@@ -443,9 +536,54 @@ export default function OverviewPage() {
           wins: overview?.tba.wins ?? "",
           losses: overview?.tba.losses ?? "",
           ties: overview?.tba.ties ?? "",
-          total_apc: overview ? getCombinedApc(overview).toFixed(2) : "",
-          auto_apc: overview ? overview.robot.autoFuelApc.toFixed(2) : "",
-          tele_apc: overview ? overview.robot.teleFuelApc.toFixed(2) : "",
+          total_apc:
+            overview && getRecentActualContribution(overview) !== null
+              ? getRecentActualContribution(overview)!.toFixed(2)
+              : "",
+          auto_apc:
+            overview && getRecentActualContribution(overview, "auto") !== null
+              ? getRecentActualContribution(overview, "auto")!.toFixed(2)
+              : "",
+          tele_apc:
+            overview && getRecentActualContribution(overview, "tele") !== null
+              ? getRecentActualContribution(overview, "tele")!.toFixed(2)
+              : "",
+          total_estimated_contribution:
+            overview && getRecentEstimatedContribution(overview) !== null
+              ? getRecentEstimatedContribution(overview)!.toFixed(2)
+              : "",
+          auto_estimated_contribution:
+            overview && getRecentEstimatedContribution(overview, "auto") !== null
+              ? getRecentEstimatedContribution(overview, "auto")!.toFixed(2)
+              : "",
+          tele_estimated_contribution:
+            overview && getRecentEstimatedContribution(overview, "tele") !== null
+              ? getRecentEstimatedContribution(overview, "tele")!.toFixed(2)
+              : "",
+          total_median_actual_contribution:
+            overview && getMedianActualContribution(overview) !== null
+              ? getMedianActualContribution(overview)!.toFixed(2)
+              : "",
+          auto_median_actual_contribution:
+            overview && getMedianActualContribution(overview, "auto") !== null
+              ? getMedianActualContribution(overview, "auto")!.toFixed(2)
+              : "",
+          tele_median_actual_contribution:
+            overview && getMedianActualContribution(overview, "tele") !== null
+              ? getMedianActualContribution(overview, "tele")!.toFixed(2)
+              : "",
+          total_median_estimated_contribution:
+            overview && getMedianEstimatedContribution(overview) !== null
+              ? getMedianEstimatedContribution(overview)!.toFixed(2)
+              : "",
+          auto_median_estimated_contribution:
+            overview && getMedianEstimatedContribution(overview, "auto") !== null
+              ? getMedianEstimatedContribution(overview, "auto")!.toFixed(2)
+              : "",
+          tele_median_estimated_contribution:
+            overview && getMedianEstimatedContribution(overview, "tele") !== null
+              ? getMedianEstimatedContribution(overview, "tele")!.toFixed(2)
+              : "",
           avg_cycles: overview ? getCombinedCycles(overview).toFixed(2) : "",
           avg_accuracy: overview ? getCombinedAccuracy(overview).toFixed(2) : "",
           defense_score: overview ? overview.robot.defenseScore.toFixed(2) : "",
@@ -461,6 +599,15 @@ export default function OverviewPage() {
             match_level: "",
             match_number: "",
             set_number: "",
+            match_total_actual_contribution: "",
+            match_total_estimated_contribution: "",
+            match_contribution_status: "",
+            match_missing_partner_count: "",
+            match_used_partner_priors: "",
+            match_auto_actual_contribution: "",
+            match_auto_estimated_contribution: "",
+            match_tele_actual_contribution: "",
+            match_tele_estimated_contribution: "",
             match_auto_fuel: "",
             match_tele_fuel: "",
             match_defense_score: "",
@@ -479,6 +626,23 @@ export default function OverviewPage() {
             match_level: match.level,
             match_number: match.matchNumber,
             set_number: match.setNumber,
+            match_total_actual_contribution:
+              match.contribution?.totalAhp?.toFixed(2) ?? "",
+            match_total_estimated_contribution:
+              match.contribution?.totalEhp?.toFixed(2) ?? "",
+            match_contribution_status: match.contribution?.status ?? "",
+            match_missing_partner_count:
+              match.contribution?.missingPartnerCount ?? "",
+            match_used_partner_priors:
+              match.contribution?.usedPartnerPriors ?? "",
+            match_auto_actual_contribution:
+              match.contribution?.auto.ahp?.toFixed(2) ?? "",
+            match_auto_estimated_contribution:
+              match.contribution?.auto.ehp?.toFixed(2) ?? "",
+            match_tele_actual_contribution:
+              match.contribution?.tele.ahp?.toFixed(2) ?? "",
+            match_tele_estimated_contribution:
+              match.contribution?.tele.ehp?.toFixed(2) ?? "",
             match_auto_fuel: match.robot
               ? calculateTotalMatchFuel(
                   match.robot.auto.cycles.cycleCount,
@@ -552,7 +716,7 @@ export default function OverviewPage() {
               </div>
               <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
                 <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                  Avg total APC
+                  Avg team {getContributionModeLabel(contributionMode)} contribution
                 </div>
                 <div className="mt-2 font-mono text-lg font-semibold">{averageTotalApc.toFixed(1)}</div>
               </div>
@@ -607,21 +771,41 @@ export default function OverviewPage() {
                 </CardDescription>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                <span className="font-mono uppercase tracking-[0.14em] text-muted-foreground">
-                  Key
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-[2px] bg-emerald-500" />
-                  <span>75th-100th</span>
+              <div className="flex flex-wrap items-end gap-3 text-xs text-muted-foreground">
+                <div className="w-full sm:w-[170px]">
+                  <div className="mb-1 font-mono uppercase tracking-[0.14em] text-muted-foreground">
+                    Contribution stat
+                  </div>
+                  <Select
+                    value={contributionMode}
+                    onValueChange={(value) => setContributionMode(value as ContributionStatMode)}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Contribution stat" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="recent">Mean</SelectItem>
+                      <SelectItem value="median">Median</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-[2px] bg-amber-400" />
-                  <span>30th-74th</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-[2px] bg-red-500" />
-                  <span>Below 30th</span>
+
+                <div className="flex flex-wrap items-center gap-3 pb-1">
+                  <span className="font-mono uppercase tracking-[0.14em] text-muted-foreground">
+                    Key
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-[2px] bg-emerald-500" />
+                    <span>75th-100th</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-[2px] bg-amber-400" />
+                    <span>30th-74th</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-[2px] bg-red-500" />
+                    <span>Below 30th</span>
+                  </div>
                 </div>
               </div>
             </div>

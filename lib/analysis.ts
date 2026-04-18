@@ -231,14 +231,14 @@ export function buildTeamStatMetrics(teams: TeamAnalytics[], team: TeamAnalytics
     buildRankedMetric(
       teams,
       team,
-      'Auto APC',
+      'Auto actual',
       (entry) => entry.robot.autoFuelApc,
       (value) => value.toFixed(1),
     ),
     buildRankedMetric(
       teams,
       team,
-      'Tele APC',
+      'Tele actual',
       (entry) => entry.robot.teleFuelApc,
       (value) => value.toFixed(1),
     ),

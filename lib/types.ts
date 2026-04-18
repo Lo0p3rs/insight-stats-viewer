@@ -82,6 +82,50 @@ export type ScoutNote = {
   matchKey: string | null;
 };
 
+export type ContributionStatus =
+  | 'missing_report'
+  | 'no_actual_score'
+  | 'actual_full_alliance'
+  | 'actual_with_partner_priors'
+  | 'insufficient_alliance_data';
+
+export type MatchContributionSegment = {
+  ehp: number | null;
+  ahp: number | null;
+  allianceActual: number | null;
+};
+
+export type MatchContribution = {
+  eventKey: string;
+  matchKey: string;
+  teamKey: string;
+  matchSort: number;
+  auto: MatchContributionSegment;
+  tele: MatchContributionSegment;
+  totalEhp: number | null;
+  totalAhp: number | null;
+  status: ContributionStatus;
+  missingPartnerCount: number;
+  usedPartnerPriors: boolean;
+};
+
+export type ContributionStatBucket = {
+  recent: number | null;
+  median: number | null;
+  minimum: number | null;
+  maximum: number | null;
+  matchCount: number;
+};
+
+export type TeamRobotContributionOverview = {
+  autoEhp: ContributionStatBucket;
+  teleEhp: ContributionStatBucket;
+  totalEhp: ContributionStatBucket;
+  autoAhp: ContributionStatBucket;
+  teleAhp: ContributionStatBucket;
+  totalAhp: ContributionStatBucket;
+};
+
 export type TeamSummaryStatus =
   | 'insufficient_data'
   | 'tentative'
@@ -201,6 +245,7 @@ export type TeamRobotOverview = {
   defenseEliteDrivingCount: number;
   failureCount: number;
   failureRecovery: number;
+  contribution: TeamRobotContributionOverview;
   scoutNotes: ScoutNote[];
 };
 
@@ -312,6 +357,7 @@ export type TeamMatchAnalytics = {
   matchNumber: number;
   setNumber: number;
   robot?: MatchRobotData | null;
+  contribution?: MatchContribution | null;
   humanPlayer?: Record<string, unknown> | null;
 };
 

@@ -483,8 +483,8 @@ function buildStatSupportLine(
     candidates.push({ score: strength, copy });
   };
 
-  pushCandidate(teleRank, `${team.robot.teleFuelApc.toFixed(1)} tele APC`);
-  pushCandidate(autoRank, `${team.robot.autoFuelApc.toFixed(1)} auto APC`);
+  pushCandidate(teleRank, `${team.robot.teleFuelApc.toFixed(1)} tele actual`);
+  pushCandidate(autoRank, `${team.robot.autoFuelApc.toFixed(1)} auto actual`);
   pushCandidate(defenseRank, `${team.robot.totalDefenseScore.toFixed(1)} defense`);
   pushCandidate(
     reliabilityRank,
@@ -704,8 +704,8 @@ export function buildScoutingSummaryReport({
         highlights,
         chips,
         statBadges: [
-          { label: 'Auto APC', value: team.robot.autoFuelApc.toFixed(1) },
-          { label: 'Tele APC', value: team.robot.teleFuelApc.toFixed(1) },
+          { label: 'Auto actual', value: team.robot.autoFuelApc.toFixed(1) },
+          { label: 'Tele actual', value: team.robot.teleFuelApc.toFixed(1) },
           { label: 'Defense', value: team.robot.totalDefenseScore.toFixed(1) },
           { label: 'OPR', value: team.tba.opr.toFixed(1) },
         ],

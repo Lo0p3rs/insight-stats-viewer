@@ -30,18 +30,25 @@ import { formatPercent } from "@/lib/format"
 import {
   average,
   computeTeamRanks,
+  formatContributionStatus,
   formatMatchLabel,
   formatRank,
   getAutoPathRows,
   getCombinedAccuracy,
   getCombinedApc,
   getCombinedCycles,
+  getMatchActualContribution,
+  getMatchEstimatedContribution,
+  getMedianActualContribution,
+  getMedianEstimatedContribution,
   getMostUsedAutoPath,
+  getRecentEstimatedContribution,
   getSummaryEvidenceCount,
   getSummaryHeadline,
   getSummaryStatusLabel,
   getTrendMatches,
   hasSummaryContent,
+  isHighConfidenceContribution,
   trend,
   trendMetricOptions,
   trendRangeOptions,
@@ -105,12 +112,47 @@ function buildScoutNameMap(scouts: Scout[]) {
   return Object.fromEntries(scouts.map((scout) => [scout.id, scout.name]))
 }
 
+function formatContributionValue(value: number | null | undefined, digits = 1) {
+  return value === null || value === undefined ? "—" : value.toFixed(digits)
+}
+
 function buildStatPages(team: TeamAnalytics): StatPage[] {
+  const autoEstimated = getRecentEstimatedContribution(team, "auto")
+  const autoEstimatedMedian = getMedianEstimatedContribution(team, "auto")
+  const autoActualMedian = getMedianActualContribution(team, "auto")
+  const teleEstimated = getRecentEstimatedContribution(team, "tele")
+  const teleEstimatedMedian = getMedianEstimatedContribution(team, "tele")
+  const teleActualMedian = getMedianActualContribution(team, "tele")
+  const totalMedian = getMedianActualContribution(team)
+
   return [
     {
       label: "Auto",
       items: [
-        { label: "APC", value: team.robot.autoFuelApc.toFixed(1), note: "estimated point contribution", rankKey: "autoFuelApc" },
+        {
+          label: "Actual mean",
+          value: team.robot.autoFuelApc.toFixed(1),
+          note:
+            autoEstimated !== null
+              ? `mean auto AHP • est ${autoEstimated.toFixed(1)}`
+              : "mean auto AHP",
+          rankKey: "autoFuelApc",
+        },
+        {
+          label: "Actual median",
+          value: formatContributionValue(autoActualMedian),
+          note: "typical auto contribution",
+        },
+        {
+          label: "Estimated mean",
+          value: formatContributionValue(autoEstimated),
+          note: "mean auto EHP",
+        },
+        {
+          label: "Estimated median",
+          value: formatContributionValue(autoEstimatedMedian),
+          note: "typical auto EHP",
+        },
         { label: "Avg fuel/cycle", value: (team.robot.autoCycleFuelCountAvg ?? 0).toFixed(1), note: "average per auto cycle", rankKey: "autoCycleFuelCountAvg" },
         { label: "Cycle count", value: team.robot.autoCycleCountAvg.toFixed(1), note: "average auto cycles", rankKey: "autoCycleCountAvg" },
         { label: "Accuracy", value: formatPercent(team.robot.autoCycleAccuracy), note: "success rate", rankKey: "autoCycleAccuracy" },
@@ -120,7 +162,30 @@ function buildStatPages(team: TeamAnalytics): StatPage[] {
     {
       label: "Teleop",
       items: [
-        { label: "APC", value: team.robot.teleFuelApc.toFixed(1), note: "estimated point contribution", rankKey: "teleFuelApc" },
+        {
+          label: "Actual mean",
+          value: team.robot.teleFuelApc.toFixed(1),
+          note:
+            teleEstimated !== null
+              ? `mean tele AHP • est ${teleEstimated.toFixed(1)}`
+              : "mean tele AHP",
+          rankKey: "teleFuelApc",
+        },
+        {
+          label: "Actual median",
+          value: formatContributionValue(teleActualMedian),
+          note: "typical tele contribution",
+        },
+        {
+          label: "Estimated mean",
+          value: formatContributionValue(teleEstimated),
+          note: "mean tele EHP",
+        },
+        {
+          label: "Estimated median",
+          value: formatContributionValue(teleEstimatedMedian),
+          note: "typical tele EHP",
+        },
         { label: "Avg fuel/cycle", value: (team.robot.teleCycleFuelCountAvg ?? 0).toFixed(1), note: "average per teleop cycle", rankKey: "teleCycleFuelCountAvg" },
         { label: "Cycle count", value: team.robot.teleCycleCountAvg.toFixed(1), note: "average tele cycles", rankKey: "teleCycleCountAvg" },
         { label: "Accuracy", value: formatPercent(team.robot.teleCycleAccuracy), note: "success rate", rankKey: "teleCycleAccuracy" },
@@ -131,7 +196,12 @@ function buildStatPages(team: TeamAnalytics): StatPage[] {
       label: "Defense & Reliability",
       items: [
         { label: "Defense score", value: team.robot.defenseScore.toFixed(1), note: "overall defensive impact", rankKey: "defenseScore" },
-        { label: "Team notes", value: `${team.robot.scoutNotes.length}`, note: "notes available", rankKey: undefined },
+        {
+          label: "Typical actual",
+          value: formatContributionValue(totalMedian),
+          note: "median total contribution",
+          rankKey: undefined,
+        },
         { label: "Failures", value: team.robot.failureCount.toFixed(0), note: "lower is better", rankKey: "failureCount" },
         { label: "Recovery", value: formatPercent(team.robot.failureRecovery), note: "recovered after issues", rankKey: "failureRecovery" },
         { label: "Drivetrain", value: team.robot.drivetrain ? titleCase(team.robot.drivetrain) : "Unknown", note: "most common setup" },
@@ -152,7 +222,7 @@ export default function TeamDetailPage() {
   const [error, setError] = useState<unknown | null>(null)
   const [reloadNonce, setReloadNonce] = useState(0)
   const [statPageIndex, setStatPageIndex] = useState(0)
-  const [trendMetric, setTrendMetric] = useState<TrendMetricKey>("autoFuelTotal")
+  const [trendMetric, setTrendMetric] = useState<TrendMetricKey>("totalActualContribution")
   const [trendRange, setTrendRange] = useState<TrendRangeKey>("all")
 
   useEffect(() => {
@@ -302,9 +372,12 @@ export default function TeamDetailPage() {
       note: "wins-losses-ties",
     },
     {
-      label: "Total APC",
+      label: "Actual contribution",
       value: getCombinedApc(overview).toFixed(1),
-      note: "auto + tele",
+      note:
+        getRecentEstimatedContribution(overview) !== null
+          ? `mean AHP • est ${getRecentEstimatedContribution(overview)!.toFixed(1)}`
+          : "mean AHP",
     },
     {
       label: "Avg cycles",
@@ -691,7 +764,7 @@ export default function TeamDetailPage() {
               <Badge variant="outline">{qualificationMatches.length} shown</Badge>
             </div>
             <CardTitle className="mt-2 text-lg">Match Details</CardTitle>
-            <CardDescription>Match-by-match scoring and defensive performance.</CardDescription>
+            <CardDescription>Match-by-match contribution, scoring, and defensive performance.</CardDescription>
           </CardHeader>
           <CardContent>
             {qualificationMatches.length > 0 ? (
@@ -704,57 +777,105 @@ export default function TeamDetailPage() {
                           {formatMatchLabel(match.matchKey, match.matchNumber)}
                         </p>
                         <Badge variant="outline">
-                          {match.robot ? "Data available" : "No details"}
+                          {match.robot
+                            ? "Report available"
+                            : match.contribution
+                              ? "Contribution only"
+                              : "No details"}
                         </Badge>
+                        {match.contribution ? (
+                          <Badge variant="outline">
+                            {formatContributionStatus(match.contribution.status)}
+                          </Badge>
+                        ) : null}
+                        {match.contribution && !isHighConfidenceContribution(match.contribution.status) ? (
+                          <Badge variant="outline">Lower confidence</Badge>
+                        ) : null}
                       </div>
                       {match.robot?.drivetrain ? (
                         <Badge variant="outline">{titleCase(match.robot.drivetrain)}</Badge>
                       ) : null}
                     </div>
 
-                    {match.robot ? (
+                    {match.robot || match.contribution ? (
                       <>
                         <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                           <div className="rounded-md border border-border/80 bg-background/40 px-2.5 py-2">
-                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Auto</p>
+                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                              Actual contribution
+                            </p>
                             <p className="mt-1 font-mono text-sm">
-                              {(match.robot.auto.cycles.cycleCount * (match.robot.auto.cycles.fuelCountAvg ?? 0)).toFixed(1)}
+                              {formatContributionValue(getMatchActualContribution(match))}
                             </p>
                           </div>
                           <div className="rounded-md border border-border/80 bg-background/40 px-2.5 py-2">
-                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Tele</p>
+                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                              Estimated contribution
+                            </p>
                             <p className="mt-1 font-mono text-sm">
-                              {(match.robot.tele.cycles.cycleCount * (match.robot.tele.cycles.fuelCountAvg ?? 0)).toFixed(1)}
+                              {formatContributionValue(getMatchEstimatedContribution(match))}
                             </p>
                           </div>
                           <div className="rounded-md border border-border/80 bg-background/40 px-2.5 py-2">
                             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Defense</p>
-                            <p className="mt-1 font-mono text-sm">{match.robot.defense.calculatedScore.toFixed(1)}</p>
+                            <p className="mt-1 font-mono text-sm">
+                              {match.robot ? match.robot.defense.calculatedScore.toFixed(1) : "—"}
+                            </p>
                           </div>
                           <div className="rounded-md border border-border/80 bg-background/40 px-2.5 py-2">
                             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Failures</p>
-                            <p className="mt-1 font-mono text-sm">{match.robot.failures.count}</p>
+                            <p className="mt-1 font-mono text-sm">
+                              {match.robot ? match.robot.failures.count : "—"}
+                            </p>
                           </div>
                         </div>
 
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          {match.robot.autoPath ? (
-                            <Badge variant="outline">{titleCase(match.robot.autoPath)}</Badge>
-                          ) : null}
-                          {match.robot.notes ? (
-                            <Badge variant="outline">Match notes</Badge>
-                          ) : null}
-                          {match.robot.defenseNotes ? (
-                            <Badge variant="outline">Defensive notes</Badge>
-                          ) : null}
-                        </div>
+                        {match.contribution ? (
+                          <div className="mt-3 rounded-md border border-border/80 bg-background/30 px-3 py-2 text-xs text-muted-foreground">
+                            <span>
+                              Auto {formatContributionValue(getMatchActualContribution(match, "auto"))} actual /{" "}
+                              {formatContributionValue(getMatchEstimatedContribution(match, "auto"))} est
+                            </span>
+                            <span className="mx-2">•</span>
+                            <span>
+                              Tele {formatContributionValue(getMatchActualContribution(match, "tele"))} actual /{" "}
+                              {formatContributionValue(getMatchEstimatedContribution(match, "tele"))} est
+                            </span>
+                            {match.contribution.missingPartnerCount > 0 ? (
+                              <>
+                                <span className="mx-2">•</span>
+                                <span>{match.contribution.missingPartnerCount} partner reports missing</span>
+                              </>
+                            ) : null}
+                          </div>
+                        ) : null}
 
-                        {match.robot.notes ? (
-                          <p className="mt-3 text-sm leading-5 text-foreground/90">{match.robot.notes}</p>
-                        ) : null}
-                        {match.robot.defenseNotes ? (
-                          <p className="mt-2 text-sm leading-5 text-muted-foreground">{match.robot.defenseNotes}</p>
-                        ) : null}
+                        {match.robot ? (
+                          <>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              {match.robot.autoPath ? (
+                                <Badge variant="outline">{titleCase(match.robot.autoPath)}</Badge>
+                              ) : null}
+                              {match.robot.notes ? (
+                                <Badge variant="outline">Match notes</Badge>
+                              ) : null}
+                              {match.robot.defenseNotes ? (
+                                <Badge variant="outline">Defensive notes</Badge>
+                              ) : null}
+                            </div>
+
+                            {match.robot.notes ? (
+                              <p className="mt-3 text-sm leading-5 text-foreground/90">{match.robot.notes}</p>
+                            ) : null}
+                            {match.robot.defenseNotes ? (
+                              <p className="mt-2 text-sm leading-5 text-muted-foreground">{match.robot.defenseNotes}</p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <p className="mt-3 text-sm text-muted-foreground">
+                            A scouting report is not available for this match, but contribution data was returned.
+                          </p>
+                        )}
                       </>
                     ) : (
                       <p className="mt-3 text-sm text-muted-foreground">

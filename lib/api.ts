@@ -18,6 +18,9 @@ import type {
   TeamAnalytics,
   TeamDetail,
   TeamMatchAnalytics,
+  TeamRobotContributionOverview,
+  MatchContribution,
+  MatchContributionSegment,
   TeamSummary,
   TeamSummaryDefenseItem,
   TeamSummaryDefenseWhenUsed,
@@ -565,6 +568,55 @@ function parseTeamSummary(raw: Record<string, unknown>): TeamSummary {
   };
 }
 
+function parseContributionStatBucket(
+  raw: Record<string, unknown> = {},
+): TeamRobotContributionOverview[keyof TeamRobotContributionOverview] {
+  return {
+    recent: toNullableNumber(raw.recent),
+    median: toNullableNumber(raw.median),
+    minimum: toNullableNumber(raw.minimum),
+    maximum: toNullableNumber(raw.maximum),
+    matchCount: toNumber(raw.match_count ?? raw.matchCount),
+  };
+}
+
+function parseRobotContributionOverview(
+  raw: Record<string, unknown> = {},
+): TeamRobotContributionOverview {
+  return {
+    autoEhp: parseContributionStatBucket(
+      (raw.auto_ehp as Record<string, unknown>) ??
+        (raw.autoEhp as Record<string, unknown>) ??
+        {},
+    ),
+    teleEhp: parseContributionStatBucket(
+      (raw.tele_ehp as Record<string, unknown>) ??
+        (raw.teleEhp as Record<string, unknown>) ??
+        {},
+    ),
+    totalEhp: parseContributionStatBucket(
+      (raw.total_ehp as Record<string, unknown>) ??
+        (raw.totalEhp as Record<string, unknown>) ??
+        {},
+    ),
+    autoAhp: parseContributionStatBucket(
+      (raw.auto_ahp as Record<string, unknown>) ??
+        (raw.autoAhp as Record<string, unknown>) ??
+        {},
+    ),
+    teleAhp: parseContributionStatBucket(
+      (raw.tele_ahp as Record<string, unknown>) ??
+        (raw.teleAhp as Record<string, unknown>) ??
+        {},
+    ),
+    totalAhp: parseContributionStatBucket(
+      (raw.total_ahp as Record<string, unknown>) ??
+        (raw.totalAhp as Record<string, unknown>) ??
+        {},
+    ),
+  };
+}
+
 function parseTeamRobotOverview(raw: Record<string, unknown>): TeamAnalytics['robot'] {
   const intakeDefenseScore = toNumber(raw.intake_defense_score);
   const scoringDefenseScore = toNumber(raw.scoring_defense_score);
@@ -572,17 +624,24 @@ function parseTeamRobotOverview(raw: Record<string, unknown>): TeamAnalytics['ro
     raw.total_defense_score,
     intakeDefenseScore + scoringDefenseScore,
   );
+  const contribution = parseRobotContributionOverview(
+    (raw.contribution as Record<string, unknown>) ?? {},
+  );
 
   return {
     autoFuelCount: toNullableNumber(raw.auto_fuel_count),
-    autoFuelApc: toNumber(raw.auto_fuel_apc ?? raw.autoFuelApc),
+    autoFuelApc: toNumber(
+      raw.auto_fuel_apc ?? raw.autoFuelApc ?? contribution.autoAhp.recent,
+    ),
     autoCycleScore: toNumber(raw.auto_cycle_score),
     autoCycleCountAvg: toNumber(raw.auto_cycle_count_avg),
     autoCycleFuelCountAvg: toNullableNumber(raw.auto_cycle_fuel_count_avg),
     autoCycleAccuracy: toNumber(raw.auto_cycle_accuracy),
     autoTowerReliability: toNumber(raw.auto_tower_reliability),
     teleFuelCount: toNullableNumber(raw.tele_fuel_count),
-    teleFuelApc: toNumber(raw.tele_fuel_apc ?? raw.teleFuelApc),
+    teleFuelApc: toNumber(
+      raw.tele_fuel_apc ?? raw.teleFuelApc ?? contribution.teleAhp.recent,
+    ),
     teleCycleScore: toNumber(raw.tele_cycle_score),
     teleCycleCountAvg: toNumber(raw.tele_cycle_count_avg),
     teleCycleFuelCountAvg: toNullableNumber(raw.tele_cycle_fuel_count_avg),
@@ -614,6 +673,7 @@ function parseTeamRobotOverview(raw: Record<string, unknown>): TeamAnalytics['ro
     defenseEliteDrivingCount: toNumber(raw.defense_elite_driving_count),
     failureCount: toNumber(raw.failure_count),
     failureRecovery: toNumber(raw.failure_recovery),
+    contribution,
     scoutNotes: Array.isArray(raw.scout_notes)
       ? raw.scout_notes.map((item) => parseScoutNote(item as Record<string, unknown>))
       : [],
@@ -772,8 +832,48 @@ function parseMatchRobot(raw: Record<string, unknown>): MatchRobotData {
   };
 }
 
+function parseMatchContributionSegment(
+  raw: Record<string, unknown> = {},
+): MatchContributionSegment {
+  return {
+    ehp: toNullableNumber(raw.ehp),
+    ahp: toNullableNumber(raw.ahp),
+    allianceActual: toNullableNumber(raw.alliance_actual ?? raw.allianceActual),
+  };
+}
+
+function parseMatchContribution(
+  raw: Record<string, unknown> = {},
+): MatchContribution {
+  return {
+    eventKey: toString(raw.event_key ?? raw.eventKey),
+    matchKey: toString(raw.match_key ?? raw.matchKey),
+    teamKey: toString(raw.team_key ?? raw.teamKey),
+    matchSort: toNumber(raw.match_sort ?? raw.matchSort),
+    auto: parseMatchContributionSegment(
+      (raw.auto as Record<string, unknown>) ?? {},
+    ),
+    tele: parseMatchContributionSegment(
+      (raw.tele as Record<string, unknown>) ?? {},
+    ),
+    totalEhp: toNullableNumber(raw.total_ehp ?? raw.totalEhp),
+    totalAhp: toNullableNumber(raw.total_ahp ?? raw.totalAhp),
+    status: toString(raw.status, 'missing_report') as MatchContribution['status'],
+    missingPartnerCount: toNumber(
+      raw.missing_partner_count ?? raw.missingPartnerCount,
+    ),
+    usedPartnerPriors: toBoolean(
+      raw.used_partner_priors ?? raw.usedPartnerPriors,
+    ),
+  };
+}
+
 function parseTeamMatchAnalytics(raw: Record<string, unknown>): TeamMatchAnalytics {
   const robotRaw = raw.robot as Record<string, unknown> | undefined;
+  const contributionRaw =
+    raw.contribution && typeof raw.contribution === 'object'
+      ? (raw.contribution as Record<string, unknown>)
+      : null;
 
   return {
     eventKey: toString(raw.event_key ?? raw.eventKey),
@@ -783,6 +883,7 @@ function parseTeamMatchAnalytics(raw: Record<string, unknown>): TeamMatchAnalyti
     matchNumber: toNumber(raw.match_number),
     setNumber: toNumber(raw.set_number),
     robot: robotRaw ? parseMatchRobot(robotRaw) : null,
+    contribution: contributionRaw ? parseMatchContribution(contributionRaw) : null,
     humanPlayer: (raw.human_player as Record<string, unknown>) ?? null,
   };
 }

@@ -1,4 +1,9 @@
-import type { TeamAnalytics, TeamMatchAnalytics, TeamSummary } from '@/lib/types';
+import type {
+  ContributionStatus,
+  TeamAnalytics,
+  TeamMatchAnalytics,
+  TeamSummary,
+} from '@/lib/types';
 import { formatPercent } from '@/lib/format';
 
 export type RankMetricKey =
@@ -71,6 +76,117 @@ const rankMetricConfig: Record<
 
 export function getCombinedApc(team: TeamAnalytics) {
   return team.robot.autoFuelApc + team.robot.teleFuelApc;
+}
+
+export type ContributionPhase = 'auto' | 'tele' | 'total';
+export type ContributionMetric = 'ahp' | 'ehp';
+export type ContributionStatMode = 'recent' | 'median';
+
+function getContributionBucket(
+  team: TeamAnalytics,
+  phase: ContributionPhase,
+  metric: ContributionMetric,
+) {
+  if (metric === 'ahp') {
+    if (phase === 'auto') return team.robot.contribution.autoAhp;
+    if (phase === 'tele') return team.robot.contribution.teleAhp;
+    return team.robot.contribution.totalAhp;
+  }
+
+  if (phase === 'auto') return team.robot.contribution.autoEhp;
+  if (phase === 'tele') return team.robot.contribution.teleEhp;
+  return team.robot.contribution.totalEhp;
+}
+
+export function getContributionSummaryValue(
+  team: TeamAnalytics,
+  phase: ContributionPhase = 'total',
+  metric: ContributionMetric = 'ahp',
+  mode: ContributionStatMode = 'recent',
+) {
+  const bucket = getContributionBucket(team, phase, metric);
+  return mode === 'median' ? bucket.median : bucket.recent;
+}
+
+export function getRecentActualContribution(
+  team: TeamAnalytics,
+  phase: ContributionPhase = 'total',
+) {
+  const value = getContributionSummaryValue(team, phase, 'ahp', 'recent');
+  if (value !== null) {
+    return value;
+  }
+
+  if (phase === 'auto') return team.robot.autoFuelApc;
+  if (phase === 'tele') return team.robot.teleFuelApc;
+  return getCombinedApc(team);
+}
+
+export function getMedianActualContribution(
+  team: TeamAnalytics,
+  phase: ContributionPhase = 'total',
+) {
+  return getContributionSummaryValue(team, phase, 'ahp', 'median');
+}
+
+export function getRecentEstimatedContribution(
+  team: TeamAnalytics,
+  phase: ContributionPhase = 'total',
+) {
+  return getContributionSummaryValue(team, phase, 'ehp', 'recent');
+}
+
+export function getMedianEstimatedContribution(
+  team: TeamAnalytics,
+  phase: ContributionPhase = 'total',
+) {
+  return getContributionSummaryValue(team, phase, 'ehp', 'median');
+}
+
+export function getMatchActualContribution(
+  match: TeamMatchAnalytics,
+  phase: ContributionPhase = 'total',
+) {
+  if (!match.contribution) {
+    return null;
+  }
+
+  if (phase === 'auto') return match.contribution.auto.ahp;
+  if (phase === 'tele') return match.contribution.tele.ahp;
+  return match.contribution.totalAhp;
+}
+
+export function getMatchEstimatedContribution(
+  match: TeamMatchAnalytics,
+  phase: ContributionPhase = 'total',
+) {
+  if (!match.contribution) {
+    return null;
+  }
+
+  if (phase === 'auto') return match.contribution.auto.ehp;
+  if (phase === 'tele') return match.contribution.tele.ehp;
+  return match.contribution.totalEhp;
+}
+
+export function formatContributionStatus(status: ContributionStatus | null | undefined) {
+  switch (status) {
+    case 'actual_full_alliance':
+      return 'Actual score'
+    case 'actual_with_partner_priors':
+      return 'Actual with priors'
+    case 'no_actual_score':
+      return 'Awaiting actual score'
+    case 'insufficient_alliance_data':
+      return 'Limited alliance data'
+    case 'missing_report':
+    default:
+      return 'Missing report'
+  }
+}
+
+export function isHighConfidenceContribution(status: ContributionStatus | null | undefined) {
+  return status === 'actual_full_alliance'
 }
 
 export function getCombinedCycles(team: TeamAnalytics) {
@@ -219,6 +335,12 @@ export function hasSummaryContent(summary: TeamSummary | null) {
 }
 
 export type TrendMetricKey =
+  | 'totalActualContribution'
+  | 'totalEstimatedContribution'
+  | 'autoActualContribution'
+  | 'autoEstimatedContribution'
+  | 'teleActualContribution'
+  | 'teleEstimatedContribution'
   | 'autoCycleCount'
   | 'autoFuelTotal'
   | 'autoFuelPerCycle'
@@ -234,6 +356,42 @@ export const trendMetricOptions: Array<{
   value: (match: TeamMatchAnalytics) => number | null;
   format: (value: number) => string;
 }> = [
+  {
+    key: 'totalActualContribution',
+    label: 'Actual Contribution',
+    value: (match) => getMatchActualContribution(match),
+    format: (value) => value.toFixed(1),
+  },
+  {
+    key: 'totalEstimatedContribution',
+    label: 'Estimated Contribution',
+    value: (match) => getMatchEstimatedContribution(match),
+    format: (value) => value.toFixed(1),
+  },
+  {
+    key: 'autoActualContribution',
+    label: 'Auto Actual Contribution',
+    value: (match) => getMatchActualContribution(match, 'auto'),
+    format: (value) => value.toFixed(1),
+  },
+  {
+    key: 'autoEstimatedContribution',
+    label: 'Auto Estimated Contribution',
+    value: (match) => getMatchEstimatedContribution(match, 'auto'),
+    format: (value) => value.toFixed(1),
+  },
+  {
+    key: 'teleActualContribution',
+    label: 'Tele Actual Contribution',
+    value: (match) => getMatchActualContribution(match, 'tele'),
+    format: (value) => value.toFixed(1),
+  },
+  {
+    key: 'teleEstimatedContribution',
+    label: 'Tele Estimated Contribution',
+    value: (match) => getMatchEstimatedContribution(match, 'tele'),
+    format: (value) => value.toFixed(1),
+  },
   {
     key: 'autoCycleCount',
     label: 'Auto Cycle Count',
